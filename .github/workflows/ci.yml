@@ -24,10 +24,12 @@ jobs:
       - run: go test ./...
 
       # Dogfood smoke test: the deterministic layer must gate its own spec
-      # cleanly (see CLAUDE.md "dogfood-смоук"). Uses the binary built above
-      # rather than `go run` — `go run`'s temp-build/exec step is flaky on
-      # some hosted runners.
-      - run: go build -o ./tumanomir ./cmd/tumanomir && ./tumanomir check docs/requirements.md
+      # cleanly (see CLAUDE.md "dogfood-смоук"). Builds via the ./cmd/...
+      # wildcard rather than the literal ./cmd/tumanomir path — on this
+      # runner image, explicit non-wildcard package paths to `go build`/
+      # `go run` spuriously failed with "directory not found" even though
+      # the same directory resolves fine via `./...` wildcard expansion.
+      - run: go build -o ./tumanomir ./cmd/... && ./tumanomir check docs/requirements.md
 
   lint:
     runs-on: ubuntu-latest
