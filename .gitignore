@@ -34,3 +34,16 @@ go.work.sum
 tumanomir
 /tumanomir
 *.test
+
+# Session recall — per-project, local-only context log
+.claude/session-log.md
+
+# Session recall index — per-project, local-only
+.claude/sessions.db
+
+# fix-review telemetry — per-project, local-only run log
+.claude/skills/fix-review/telemetry.jsonl
+
+# self-learn raw pattern data — solo project, kept local
+_patterns/mistakes.jsonl
+_patterns/wins.jsonl
