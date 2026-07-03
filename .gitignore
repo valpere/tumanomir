@@ -31,7 +31,8 @@ go.work.sum
 .idea/
 .vscode/
 
-tumanomir
+# Compiled binary in repo root only (anchored — an unanchored "tumanomir"
+# here would also match cmd/tumanomir/, silently untracking the CLI source).
 /tumanomir
 *.test
 
