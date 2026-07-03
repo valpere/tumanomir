@@ -31,10 +31,15 @@
 
 ## Побудова та перевірка
 
+Бінарник збирається в `bin/` через `make`, не `go build`/`go run` напряму.
+
 ```bash
-go build ./...
-go test ./...
-go run ./cmd/tumanomir check docs/requirements.md   # dogfood-смоук
+make build     # -> bin/tumanomir
+make vet
+make test
+make dogfood   # bin/tumanomir check docs/requirements.md — dogfood-смоук
+make lint      # golangci-lint run (потребує встановленого golangci-lint)
+make ci        # build + vet + test + lint + dogfood, усе разом
 ```
 
 ## Конвенції
