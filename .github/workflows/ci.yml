@@ -36,7 +36,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
           install-mode: goinstall # build from source with the runner's Go toolchain —
           version: latest         # avoids "targeted Go version > golangci-lint's build Go version"
