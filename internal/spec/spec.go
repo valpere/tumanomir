@@ -11,8 +11,8 @@ import (
 
 // Spec is one loaded specification document.
 type Spec struct {
-	Path    string
-	Content []byte
+	Path    string // filesystem path as passed to or discovered by Load
+	Content []byte // raw file bytes, unparsed
 }
 
 // Load reads a single markdown file, or all *.md files under a directory
