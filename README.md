@@ -12,8 +12,8 @@ distributions over possible implementations — so measure the spread.
 
 | Metric | Layer | What it measures |
 | --- | --- | --- |
-| `K_drift` | deterministic | requirements without `[REQ-*] -> [FUN-*]` trace edges |
-| `D_const` | deterministic | lexical density of machine-readable constraints |
+| `K_drift` | deterministic | requirements without `[REQ-*] -> [FUN-*]` trace edges (trace-markup coverage, not implementation correctness) |
+| `D_const` | deterministic | lexical density of machine-readable constraints (lexical proxy — rewards markup density, not constraint quality; advisory-only, never blocks) |
 | `D_pair` | stochastic (LLM) | 1 − mean pairwise AST similarity of N generations |
 | `H_norm` | stochastic (LLM) | cluster entropy / log₂N — ordinal signal only |
 
@@ -26,8 +26,15 @@ spread, the foggier the spec.
 
 ```bash
 tumanomir check docs/                 # deterministic, instant
+```
+
+The stochastic `measure` command (`D_pair`, `H_norm`) is specified in
+`docs/requirements.md` §2.2 (REQ-MSR-01..06) but not yet implemented; its
+planned invocation looks like:
+
+```bash
 tumanomir measure docs/spec.md \
-  --instrument ollama:qwen3-coder:30b -n 10
+  --instrument ollama:qwen3-coder:30b -n 10  # specified, not yet implemented
 ```
 
 Exit codes: `0` gates pass · `1` gate failed · `2` error.
@@ -41,6 +48,10 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 
 v0.1 in development. See `docs/requirements.md` (written in tumanomir's
 own traceable markup — we eat our own dog food).
+
+- `check` (deterministic layer: `K_drift`, `D_const`) is **implemented**.
+- `measure` (stochastic layer: `D_pair`, `H_norm`) is **specified**
+  (`docs/requirements.md` §2.2, REQ-MSR-01..06) but **not yet implemented**.
 
 ## License
 
