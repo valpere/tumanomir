@@ -121,6 +121,15 @@ own specification (dogfooding).
     hiding invalid generations is forbidden.
     -> [FUN-MSR-05] measure loop: retry ≤ 2 per sample; DispersionResult.Discarded
 
+    A discard rate above a documented threshold must be flagged prominently
+    in the `measure` command's report output, not merely included in the
+    numeric summary buried among other stats. The proposed threshold is 40%,
+    matching the retry budget of ≤2 per sample — stated here as a hypothesis,
+    not a calibrated constant, the same treatment given to the 0.20/0.35/0.30
+    thresholds elsewhere in this document (see REQ-CFG-01). This is a warning
+    signal only, not a new gate: it implies no exit-code change, consistent
+    with D_pair/H_norm staying ordinal/advisory in v0.1.
+
 12. [REQ-MSR-06] For reasoning-capable models the instrument must set
     think=false; requests must set num_ctx and num_predict explicitly.
     Silent truncation of the input spec is a measurement-integrity bug.
