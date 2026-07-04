@@ -70,6 +70,16 @@ own specification (dogfooding).
    -> [LOG-CHK-05] packages internal/metrics, internal/spec have no
       network imports (enforced by test)
 
+6. [REQ-CHK-06] D_const is a lexical proxy, not a ground-truth measure of
+   specification precision — it must never produce `VerdictBlock` (exit
+   code 1, see REQ-OUT-02) regardless of its value relative to
+   `d_const_min`. When D_const falls below threshold the tool must report
+   `VerdictWarn` at most; only K_drift's verdict may block. This is
+   advisory-only by design, not an oversight.
+   -> [LOG-CHK-06] cmd/tumanomir/main.go `aggregate`: `dcVerdict` is
+      assigned only `VerdictOK` or `VerdictWarn`, never `VerdictBlock`;
+      the exit-code-1 branch in `runCheck` checks `KDVerdict` exclusively.
+
 ### 2.2 Stochastic layer (`measure` command)
 
 6. [REQ-MSR-01] The tool must measure D_pair = 1 − mean pairwise
