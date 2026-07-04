@@ -6,7 +6,7 @@ location so a future `internal/dispersion` test package can load it
 directly (`testdata/` is auto-excluded from `go build`/`go vet`/`go list`
 package scanning by Go convention).
 
-This is a **2-of-6-spec, 2-instrument subset** of the full 120-file
+This is a **1-of-6-spec, 2-instrument subset** of the full 120-file
 archival corpus at `docs/investigation/_sanity/` — see that directory
 (and its own `README.md`) for the complete corpus and full methodology.
 
