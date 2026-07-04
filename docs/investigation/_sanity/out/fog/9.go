@@ -1,0 +1,76 @@
+package payment
+
+import (
+	"time"
+)
+
+type TransactionStatus string
+type PaymentProvider string
+
+const (
+	Success TransactionStatus = "success"
+	Failure TransactionStatus = "failure"
+	Pending TransactionStatus = "pending"
+)
+
+const (
+	Stripe    PaymentProvider = "stripe"
+	PayPal    PaymentProvider = "paypal"
+	BankTrans PaymentProvider = "bank_transfer"
+)
+
+type Transaction struct {
+	ID           string
+	Amount       float64
+	Currency     string
+	Provider     PaymentProvider
+	Status       TransactionStatus
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Error        *string
+	Description  string
+	UserID       string
+	ReferenceID  string
+}
+
+type TransactionLog struct {
+	ID          string
+	Transaction *Transaction
+	LogLevel    string
+	Message     string
+	Timestamp   time.Time
+}
+
+type PaymentProcessor interface {
+	ProcessPayment(transaction *Transaction) error
+	GetTransactionStatus(transactionID string) (TransactionStatus, error)
+	RefundPayment(transactionID string) error
+}
+
+type Logger interface {
+	Log(transaction *Transaction, level string, message string) error
+}
+
+func NewPaymentProcessor(provider PaymentProvider, logger Logger) PaymentProcessor {
+	return &paymentProcessor{}
+}
+
+func NewTransaction(amount float64, currency string, provider PaymentProvider, userID string) *Transaction {
+	return &Transaction{}
+}
+
+func (p *paymentProcessor) ProcessPayment(transaction *Transaction) error {
+	return nil
+}
+
+func (p *paymentProcessor) GetTransactionStatus(transactionID string) (TransactionStatus, error) {
+	return "", nil
+}
+
+func (p *paymentProcessor) RefundPayment(transactionID string) error {
+	return nil
+}
+
+func (l *logger) Log(transaction *Transaction, level string, message string) error {
+	return nil
+}

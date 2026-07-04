@@ -1,0 +1,484 @@
+package ragivka
+
+import (
+	"context"
+	"database/sql"
+	"io"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type TenantID string
+type UserID string
+type SessionID string
+type MessageID string
+type DocumentID string
+type ChunkID string
+type ArtifactID string
+type JobID string
+type PromptName string
+type ToolName string
+type IdempotencyKey string
+
+type OrchestrationTier int
+
+const (
+	L0Deterministic OrchestrationTier = iota
+	L1ToolAssistant
+	L2WorkflowPipeline
+	L3MultiAgentGraph
+)
+
+type SessionState string
+
+const (
+	StateActive          SessionState = "Active"
+	StateWaitingForHuman SessionState = "WaitingForHuman"
+	StateCompleted       SessionState = "Completed"
+	StateExpired         SessionState = "Expired"
+)
+
+type ToolPermission string
+
+const (
+	PermissionRead  ToolPermission = "Read"
+	PermissionDraft ToolPermission = "Draft"
+	PermissionWrite ToolPermission = "Write"
+)
+
+type IngestionStatus string
+
+const (
+	StatusPending  IngestionStatus = "pending"
+	StatusIndexed  IngestionStatus = "indexed"
+	StatusStale    IngestionStatus = "stale"
+	StatusFailed   IngestionStatus = "failed"
+)
+
+type ChannelType string
+
+const (
+	ChannelTelegram ChannelType = "telegram"
+	ChannelWeb      ChannelType = "web"
+)
+
+type Tenant struct {
+	ID        TenantID
+	Name      string
+	CreatedAt time.Time
+}
+
+type User struct {
+	ID          UserID
+	TenantID    TenantID
+	ChannelType ChannelType
+	ChannelID   string
+	CreatedAt   time.Time
+}
+
+type Session struct {
+	ID                SessionID
+	TenantID          TenantID
+	UserID            UserID
+	State             SessionState
+	Version           int
+	OrchestrationTier OrchestrationTier
+	Channel           ChannelType
+	ExpiresAt         time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type Message struct {
+	ID           MessageID
+	TenantID     TenantID
+	SessionID    SessionID
+	Role         string
+	Content      string
+	CitationRefs []string
+	TokenCount   int
+	JobID        *JobID
+	CreatedAt    time.Time
+}
+
+type RiverJob struct {
+	ID              JobID
+	TenantID        TenantID
+	SessionID       *SessionID
+	IdempotencyKey  *IdempotencyKey
+	Payload         pgtype.JSONB
+	Attempt         int
+	Status          string
+	ScheduledAt     time.Time
+	LastError       *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type Document struct {
+	ID              DocumentID
+	TenantID        TenantID
+	S3Key           string
+	Version         int
+	IngestionStatus IngestionStatus
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type Chunk struct {
+	ID         ChunkID
+	TenantID   TenantID
+	DocumentID DocumentID
+	Ordinal    int
+	Content    string
+	Vector     pgtype.Vector
+	TSVector   string
+	SourceLoc  string
+	Metadata   pgtype.JSONB
+}
+
+type Artifact struct {
+	ID        ArtifactID
+	TenantID  TenantID
+	SessionID SessionID
+	S3Key     string
+	Type      string
+	CreatedAt time.Time
+}
+
+type PromptVersion struct {
+	ID        int
+	Name      PromptName
+	Version   string
+	Content   string
+	CreatedAt time.Time
+}
+
+type AuditLog struct {
+	ID             string
+	TenantID       TenantID
+	UserID         *UserID
+	SessionID      *SessionID
+	ToolName       ToolName
+	IdempotencyKey IdempotencyKey
+	RequestHash    string
+	ResponseHash   string
+	ApprovalRecord *pgtype.JSONB
+	CreatedAt      time.Time
+}
+
+type ModelProvider string
+
+const (
+	ProviderOpenAI    ModelProvider = "openai"
+	ProviderAnthropic ModelProvider = "anthropic"
+	ProviderOpenRouter ModelProvider = "openrouter"
+	ProviderGemini    ModelProvider = "gemini"
+	ProviderOllama    ModelProvider = "ollama"
+)
+
+type ModelRequest struct {
+	TenantID TenantID
+	Prompt   string
+	Schema   interface{}
+}
+
+type ModelResponse struct {
+	Provider ModelProvider
+	Model    string
+	Content  string
+	Tokens   TokenUsage
+	CostUSD  float64
+}
+
+type TokenUsage struct {
+	Prompt     int
+	Completion int
+}
+
+type LLMClient interface {
+	Complete(ctx context.Context, req ModelRequest) (ModelResponse, error)
+}
+
+type ModelRouter interface {
+	Route(ctx context.Context, task TaskComplexity) (LLMClient, error)
+}
+
+type TaskComplexity int
+
+const (
+	TaskCheap TaskComplexity = iota
+	TaskComplex
+)
+
+type PromptRegistry interface {
+	Load(ctx context.Context, name PromptName, version string) (string, error)
+}
+
+type StructuredOutputParser interface {
+	Parse(ctx context.Context, raw string, target interface{}) error
+}
+
+type CriticHook func(ctx context.Context, answer string, chunks []Chunk) (EvaluationResult, error)
+
+type EvaluationResult struct {
+	RecallAtK       float64
+	CitationCoverage float64
+	Grounded        bool
+}
+
+type Guardrails struct{}
+
+func (g *Guardrails) Evaluate(ctx context.Context, answer string, chunks []Chunk) (EvaluationResult, error) {
+	return EvaluationResult{}, nil
+}
+
+type EmbeddingProvider interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+type Reranker interface {
+	Rerank(ctx context.Context, query string, chunks []Chunk, topK int) ([]Chunk, error)
+}
+
+type RetrievalResult struct {
+	Chunks    []Chunk
+	Citations []Citation
+}
+
+type Citation struct {
+	DocumentID DocumentID
+	DocumentName string
+	Ordinal      int
+	SourceLoc    string
+}
+
+type HybridRetriever interface {
+	Retrieve(ctx context.Context, tenantID TenantID, query string, topK int) (RetrievalResult, error)
+}
+
+type Connector interface {
+	Fetch(ctx context.Context, source string) (io.Reader, error)
+}
+
+type Parser interface {
+	Parse(ctx context.Context, r io.Reader) (string, error)
+}
+
+type Chunker interface {
+	Chunk(ctx context.Context, text string) ([]string, error)
+}
+
+type IngestionPipeline interface {
+	Ingest(ctx context.Context, tenantID TenantID, source string) (DocumentID, error)
+}
+
+type Tool interface {
+	Name() ToolName
+	Permission() ToolPermission
+	Schema() interface{}
+	Execute(ctx context.Context, args json.RawMessage) (json.RawMessage, error)
+}
+
+type ToolRegistry interface {
+	Register(tool Tool) error
+	Resolve(name ToolName) (Tool, error)
+	ByPermission(p ToolPermission) []Tool
+}
+
+type ReadTool struct{}
+
+func (t *ReadTool) Name() ToolName { return "" }
+func (t *ReadTool) Permission() ToolPermission { return PermissionRead }
+func (t *ReadTool) Schema() interface{} { return nil }
+func (t *ReadTool) Execute(ctx context.Context, args json.RawMessage) (json.RawMessage, error) { return nil, nil }
+
+type DraftTool struct{}
+
+func (t *DraftTool) Name() ToolName { return "" }
+func (t *DraftTool) Permission() ToolPermission { return PermissionDraft }
+func (t *DraftTool) Schema() interface{} { return nil }
+func (t *DraftTool) Execute(ctx context.Context, args json.RawMessage) (json.RawMessage, error) { return nil, nil }
+
+type WriteTool struct{}
+
+func (t *WriteTool) Name() ToolName { return "" }
+func (t *WriteTool) Permission() ToolPermission { return PermissionWrite }
+func (t *WriteTool) Schema() interface{} { return nil }
+func (t *WriteTool) Execute(ctx context.Context, args json.RawMessage) (json.RawMessage, error) { return nil, nil }
+
+type ToolCache interface {
+	Get(ctx context.Context, key string) (json.RawMessage, bool)
+	Set(ctx context.Context, key string, value json.RawMessage, ttl time.Duration)
+}
+
+type FSMAdapter interface {
+	CreateSession(ctx context.Context, tenantID TenantID, userID UserID, tier OrchestrationTier) (Session, error)
+	LoadSession(ctx context.Context, tenantID TenantID, id SessionID) (Session, error)
+	Transition(ctx context.Context, session Session, to SessionState) (Session, error)
+	ExpireInactive(ctx context.Context, before time.Time) error
+}
+
+type SessionManager struct {
+	FSM FSMAdapter
+}
+
+func (m *SessionManager) HandleMessage(ctx context.Context, tenantID TenantID, sessionID SessionID, message string) (Message, error) {
+	return Message{}, nil
+}
+
+func (m *SessionManager) EnforceRetention(ctx context.Context, sessionID SessionID, maxTurns int) error {
+	return nil
+}
+
+type HITLGates interface {
+	RequestApproval(ctx context.Context, session Session, tool Tool, args json.RawMessage) error
+	Approve(ctx context.Context, session Session, record ApprovalRecord) error
+}
+
+type ApprovalRecord struct {
+	SessionID      SessionID
+	ToolName       ToolName
+	IdempotencyKey IdempotencyKey
+	ApprovedBy     UserID
+	ApprovedAt     time.Time
+}
+
+type RiverWorker interface {
+	Enqueue(ctx context.Context, job RiverJob) error
+	ClaimAndExecute(ctx context.Context, handler JobHandler) error
+}
+
+type JobHandler func(ctx context.Context, job RiverJob) error
+
+type GraphNode struct {
+	ID       string
+	Timeout  time.Duration
+	Execute  func(ctx context.Context, input interface{}) (interface{}, error)
+	Deps     []string
+}
+
+type GraphEngine interface {
+	Execute(ctx context.Context, nodes []GraphNode, input interface{}) (interface{}, error)
+}
+
+type ChannelAdapter interface {
+	Receive(ctx context.Context, payload []byte) (ChannelMessage, error)
+	Send(ctx context.Context, tenantID TenantID, recipient string, response ChannelResponse) error
+}
+
+type ChannelMessage struct {
+	TenantID  TenantID
+	UserID    UserID
+	SessionID *SessionID
+	Text      string
+	Metadata  map[string]string
+}
+
+type ChannelResponse struct {
+	Text      string
+	Markup    interface{}
+	Citations []Citation
+}
+
+type TelegramAdapter struct{}
+
+func (a *TelegramAdapter) Receive(ctx context.Context, payload []byte) (ChannelMessage, error) { return ChannelMessage{}, nil }
+func (a *TelegramAdapter) Send(ctx context.Context, tenantID TenantID, recipient string, response ChannelResponse) error { return nil }
+
+type WebWidgetAdapter struct{}
+
+func (a *WebWidgetAdapter) Receive(ctx context.Context, payload []byte) (ChannelMessage, error) { return ChannelMessage{}, nil }
+func (a *WebWidgetAdapter) Send(ctx context.Context, tenantID TenantID, recipient string, response ChannelResponse) error { return nil }
+
+type AuthService interface {
+	Authenticate(ctx context.Context, token string) (TenantID, error)
+	Authorize(ctx context.Context, tenantID TenantID, action string) error
+}
+
+type RateLimiter interface {
+	Allow(ctx context.Context, tenantID TenantID, key string, limit int, window time.Duration) (bool, error)
+}
+
+type Config struct {
+	DatabaseURL      string
+	RedisURL         string
+	ObjectStorageURL string
+	DeploymentMode   string
+	OfflineMode      bool
+}
+
+type Application struct {
+	Config       Config
+	Pool         *pgxpool.Pool
+	Auth         AuthService
+	Sessions     *SessionManager
+	Retriever    HybridRetriever
+	ModelRouter  ModelRouter
+	Tools        ToolRegistry
+	Channels     map[ChannelType]ChannelAdapter
+	Worker       RiverWorker
+	RateLimiter  RateLimiter
+	Graph        GraphEngine
+	Prompts      PromptRegistry
+	Guardrails   *Guardrails
+}
+
+func NewApplication(cfg Config) (*Application, error) {
+	return nil, nil
+}
+
+func (app *Application) RunAPIServer(ctx context.Context) error {
+	return nil
+}
+
+func (app *Application) RunWorker(ctx context.Context) error {
+	return nil
+}
+
+func (app *Application) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+type ArtifactGenerator interface {
+	GeneratePDF(ctx context.Context, data interface{}) (ArtifactID, error)
+	GenerateExcel(ctx context.Context, data interface{}) (ArtifactID, error)
+}
+
+type CostTracker interface {
+	Record(ctx context.Context, tenantID TenantID, usage TokenUsage, costUSD float64) error
+}
+
+type MetricsCollector interface {
+	RecordLLMTokens(provider string, usage TokenUsage)
+	RecordRetrievalLatency(d time.Duration)
+	RecordQueueDepth(queue string, depth int)
+	RecordError(component string)
+}
+
+type Tracer interface {
+	Start(ctx context.Context, name string) (context.Context, Span)
+}
+
+type Span interface {
+	End()
+	RecordError(err error)
+}
+
+type ObjectStorage interface {
+	Put(ctx context.Context, key string, r io.Reader) error
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, key string) error
+}
+
+type PIIStripper interface {
+	Strip(ctx context.Context, text string) (string, error)
+}
+
+type APIError struct {
+	Code    string
+	Message string
+	Details map[string]interface{}
+}

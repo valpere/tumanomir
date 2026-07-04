@@ -1,0 +1,69 @@
+package payment
+
+import (
+	"time"
+)
+
+type TransactionStatus string
+type PaymentProvider string
+
+const (
+	Success TransactionStatus = "success"
+	Failure TransactionStatus = "failure"
+	Pending TransactionStatus = "pending"
+)
+
+const (
+	Stripe    PaymentProvider = "stripe"
+	PayPal    PaymentProvider = "paypal"
+	BankTrans PaymentProvider = "bank_transfer"
+)
+
+type Transaction struct {
+	ID           string
+	Amount       float64
+	Currency     string
+	Provider     PaymentProvider
+	Status       TransactionStatus
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Error        *string
+	Description  *string
+	UserID       string
+	ReferenceID  *string
+}
+
+type PaymentService interface {
+	ProcessTransaction(transaction *Transaction) error
+	GetTransaction(id string) (*Transaction, error)
+	ListTransactions(filter map[string]interface{}) ([]*Transaction, error)
+	LogTransaction(transaction *Transaction) error
+}
+
+type Logger interface {
+	Info(message string, fields ...interface{})
+	Error(message string, fields ...interface{})
+	Debug(message string, fields ...interface{})
+}
+
+func NewPaymentService(logger Logger) PaymentService {
+	return &paymentService{}
+}
+
+type paymentService struct{}
+
+func (s *paymentService) ProcessTransaction(transaction *Transaction) error {
+	return nil
+}
+
+func (s *paymentService) GetTransaction(id string) (*Transaction, error) {
+	return nil, nil
+}
+
+func (s *paymentService) ListTransactions(filter map[string]interface{}) ([]*Transaction, error) {
+	return nil, nil
+}
+
+func (s *paymentService) LogTransaction(transaction *Transaction) error {
+	return nil
+}

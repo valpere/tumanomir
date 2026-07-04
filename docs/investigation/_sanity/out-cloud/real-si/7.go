@@ -1,0 +1,203 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"io"
+	"time"
+)
+
+type Config struct {
+	DBPath        string
+	OllamaModel   string
+	OllamaURL     string
+	EmbeddingDims int
+}
+
+const (
+	MetaSchemaVersion     = 1
+	DefaultLimit          = 5
+	MineDeadlineSeconds   = 50
+	MinContentLength      = 30
+	SnippetLength         = 200
+	DefaultOllamaModel    = "bge-m3:latest"
+	DefaultOllamaURL      = "http://localhost:11434"
+	DefaultEmbeddingDims  = 1024
+)
+
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+)
+
+type MessageRecord struct {
+	Type        string    `json:"type"`
+	Timestamp   time.Time `json:"timestamp"`
+	Message     struct {
+		Content string `json:"content"`
+	} `json:"message"`
+	IsMeta      *bool  `json:"isMeta"`
+	SessionID   string `json:"sessionId"`
+}
+
+type Chunk struct {
+	ID          int64
+	SessionID   string
+	ProjectHash string
+	Role        Role
+	Content     string
+	Timestamp   time.Time
+	CreatedAt   time.Time
+}
+
+type Embedding struct {
+	ChunkID int64
+	Vector  []float32
+	Model   string
+}
+
+type SearchResult struct {
+	Chunk     Chunk
+	Snippet   string
+	Score     float64
+	Rank      int
+	Source    string
+}
+
+type MineResult struct {
+	SessionID      string
+	ChunksStored   int
+	ChunksEmbedded int
+	Deferred       int
+	Skipped        int
+	Errors         []error
+}
+
+type SearchOptions struct {
+	Query     string
+	Limit     int
+	JSON      bool
+}
+
+type Stats struct {
+	Sessions          int64
+	Chunks            int64
+	EmbeddedChunks    int64
+	PendingEmbeddings int64
+	DBSizeBytes       int64
+	SchemaVersion     int64
+}
+
+type JSONLParser struct {
+	Filter MessageFilter
+}
+
+type MessageFilter func(MessageRecord) bool
+
+func DefaultMessageFilter(r MessageRecord) bool { return false }
+
+func (p *JSONLParser) ParseSession(r io.Reader, fallbackSessionID string) ([]Chunk, error) {
+	return nil, nil
+}
+
+func StripSystemReminders(content string) string { return "" }
+
+func StripSlashCommandEchoes(content string) string { return "" }
+
+func CleanContent(content string) string { return "" }
+
+type Store struct {
+	db *sql.DB
+}
+
+func OpenStore(path string) (*Store, error) { return nil, nil }
+
+func (s *Store) Close() error { return nil }
+
+func (s *Store) InitSchema() error { return nil }
+
+func (s *Store) GetSchemaVersion() (int, error) { return 0, nil }
+
+func (s *Store) validateSchemaVersion() error { return nil }
+
+func (s *Store) UpsertSession(sessionID string, minedAt time.Time) error { return nil }
+
+func (s *Store) UpsertChunks(chunks []Chunk) ([]int64, error) { return nil, nil }
+
+func (s *Store) GetUnembeddedChunks(limit int) ([]Chunk, error) { return nil, nil }
+
+func (s *Store) InsertEmbeddings(embeddings []Embedding) error { return nil }
+
+func (s *Store) SearchEmbedding(query []float32, limit int) ([]SearchResult, error) { return nil, nil }
+
+func (s *Store) SearchFTS5(query string, limit int) ([]SearchResult, error) { return nil, nil }
+
+func (s *Store) HasEmbeddings() (bool, error) { return false, nil }
+
+func (s *Store) Stats() (Stats, error) { return Stats{}, nil }
+
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+	ModelName() string
+}
+
+type OllamaEmbedder struct {
+	Model string
+	URL   string
+	Dims  int
+}
+
+func NewOllamaEmbedder(cfg Config) *OllamaEmbedder { return nil }
+
+func (e *OllamaEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) { return nil, nil }
+
+func (e *OllamaEmbedder) ModelName() string { return "" }
+
+func (e *OllamaEmbedder) IsAvailable(ctx context.Context) bool { return false }
+
+type NullEmbedder struct{}
+
+func (NullEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) { return nil, nil }
+func (NullEmbedder) ModelName() string { return "" }
+
+type Indexer struct {
+	Store    *Store
+	Embedder Embedder
+	Config   Config
+}
+
+func NewIndexer(store *Store, embedder Embedder, cfg Config) *Indexer { return nil }
+
+func (idx *Indexer) Mine(ctx context.Context, jsonlPath string) (MineResult, error) { return MineResult{}, nil }
+
+func (idx *Indexer) EmbedPending(ctx context.Context) (int, int, error) { return 0, 0, nil }
+
+func (idx *Indexer) Search(ctx context.Context, opts SearchOptions) ([]SearchResult, error) { return nil, nil }
+
+func NormalizeVector(v []float32) []float32 { return nil }
+
+func CosineSimilarity(a, b []float32) float32 { return 0 }
+
+func TruncateSnippet(content string, maxLen int) string { return "" }
+
+func DetectProjectRoot(explicitRoot string) (string, error) { return "", nil }
+
+func DefaultDBPath(projectRoot string) string { return "" }
+
+type CLI struct {
+	Out io.Writer
+	Err io.Writer
+}
+
+func (c *CLI) Run(args []string) error { return nil }
+
+func main() {}
+
+var (
+	ErrSchemaMismatch = errors.New("schema version mismatch")
+	ErrOllamaUnavailable = errors.New("ollama unavailable")
+	ErrEmptyStore      = errors.New("no indexed sessions")
+)

@@ -1,0 +1,255 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// TenantID uniquely identifies a tenant in the system
+type TenantID string
+
+// SessionID uniquely identifies a conversation session
+type SessionID string
+
+// DocumentID uniquely identifies a document
+type DocumentID string
+
+// ArtifactID uniquely identifies a generated artifact
+type ArtifactID string
+
+// ToolName uniquely identifies a registered tool
+type ToolName string
+
+// ModelProvider represents supported LLM providers
+type ModelProvider string
+
+// ToolPermission defines the permission level for a tool
+type ToolPermission string
+
+const (
+	ToolPermissionRead   ToolPermission = "read"
+	ToolPermissionDraft  ToolPermission = "draft"
+	ToolPermissionWrite  ToolPermission = "write"
+)
+
+// FSMState represents the state of a conversation session
+type FSMState string
+
+const (
+	FSMStateActive        FSMState = "active"
+	FSMStateWaitingForHuman FSMState = "waiting_for_human"
+	FSMStateCompleted     FSMState = "completed"
+	FSMStateExpired       FSMState = "expired"
+)
+
+// ToolRegistry manages registered tools
+type ToolRegistry interface {
+	RegisterTool(name ToolName, tool Tool, permissions []ToolPermission) error
+	GetTool(name ToolName) (Tool, bool)
+	ListTools() []ToolName
+}
+
+// Tool represents a callable function in the system
+type Tool interface {
+	Name() ToolName
+	Execute(ctx context.Context, args map[string]interface{}) (interface{}, error)
+	Permissions() []ToolPermission
+	Schema() map[string]interface{}
+}
+
+// ModelRouter routes requests to appropriate LLM providers
+type ModelRouter interface {
+	Route(ctx context.Context, task string) (ModelProvider, error)
+	GetModelForProvider(provider ModelProvider, task string) string
+}
+
+// PromptRegistry stores and retrieves system prompts
+type PromptRegistry interface {
+	GetPrompt(ctx context.Context, name string, version string) (string, error)
+	ListPrompts(ctx context.Context) ([]string, error)
+}
+
+// VectorStore handles document chunking and retrieval
+type VectorStore interface {
+	IndexDocument(ctx context.Context, doc DocumentID, chunks []string, metadata map[string]interface{}) error
+	Retrieve(ctx context.Context, query string, limit int) ([]string, error)
+}
+
+// ArtifactStorage handles storage of generated artifacts
+type ArtifactStorage interface {
+	StoreArtifact(ctx context.Context, artifact ArtifactID, data []byte, contentType string) error
+	GetArtifact(ctx context.Context, artifact ArtifactID) ([]byte, string, error)
+}
+
+// ChannelAdapter handles communication with external channels
+type ChannelAdapter interface {
+	SendMessage(ctx context.Context, tenant TenantID, session SessionID, message string) error
+	ReceiveMessage(ctx context.Context, tenant TenantID) (string, error)
+}
+
+// RateLimiter enforces rate limits per tenant
+type RateLimiter interface {
+	Allow(ctx context.Context, tenant TenantID) (bool, error)
+}
+
+// AuditLogger logs write operations and FSM transitions
+type AuditLogger interface {
+	LogWriteOperation(ctx context.Context, tenant TenantID, operation string, details map[string]interface{}) error
+	LogFSMTransition(ctx context.Context, tenant TenantID, session SessionID, fromState FSMState, toState FSMState) error
+}
+
+// JobQueue manages background jobs using River
+type JobQueue interface {
+	Submit(ctx context.Context, job *river.Job) error
+	Enqueue(ctx context.Context, job river.JobArgs) error
+}
+
+// SessionManager handles conversation sessions and state transitions
+type SessionManager interface {
+	CreateSession(ctx context.Context, tenant TenantID, initialMessage string) (SessionID, error)
+	GetSession(ctx context.Context, tenant TenantID, session SessionID) (*ConversationSession, error)
+	UpdateSession(ctx context.Context, tenant TenantID, session *ConversationSession) error
+	TransitionState(ctx context.Context, tenant TenantID, sessionID SessionID, toState FSMState) error
+	ExpireInactiveSessions(ctx context.Context, tenant TenantID, timeout time.Duration) error
+}
+
+// ConversationSession represents a user conversation state
+type ConversationSession struct {
+	ID          SessionID
+	TenantID    TenantID
+	State       FSMState
+	Version     int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	LastActive  time.Time
+	History     []Message
+	CurrentTool ToolName
+}
+
+// Message represents a single message in the conversation history
+type Message struct {
+	ID        string
+	Role      string // "user", "assistant", "system"
+	Content   string
+	Timestamp time.Time
+}
+
+// RAGResponse encapsulates the result of a retrieval-augmented generation
+type RAGResponse struct {
+	Answer     string
+	Citations  []Citation
+	TraceID    string
+	TokenUsage int
+	Cost       float64
+}
+
+// Citation represents a source chunk reference in the answer
+type Citation struct {
+	DocumentID DocumentID
+	ChunkIndex int
+	Content    string
+}
+
+// FrameworkConfig holds the configuration for the Ragivka framework
+type FrameworkConfig struct {
+	PostgreSQLURL     string
+	RedisURL          string
+	ObjectStorageURL  string
+	EmbeddingModel    string
+	LLMModelRouter    ModelRouter
+	ToolRegistry      ToolRegistry
+	PromptRegistry    PromptRegistry
+	VectorStore       VectorStore
+	ArtifactStorage   ArtifactStorage
+	SessionManager    SessionManager
+	JobQueue          JobQueue
+	RateLimiter       RateLimiter
+	AuditLogger       AuditLogger
+	Tracer            trace.Tracer
+	MetricsCollector  MetricsCollector
+}
+
+// MetricsCollector collects and reports system metrics
+type MetricsCollector interface {
+	RecordTokenUsage(ctx context.Context, tenant TenantID, promptTokens, completionTokens int) error
+	RecordRetrievalLatency(ctx context.Context, latency time.Duration) error
+	RecordQueueDepth(ctx context.Context, depth int) error
+	RecordError(ctx context.Context, err error) error
+}
+
+// APIHandler handles incoming HTTP requests
+type APIHandler interface {
+	HandleRequest(ctx context.Context, tenant TenantID, session SessionID, message string) (*RAGResponse, error)
+}
+
+// Framework represents the main Ragivka framework instance
+type Framework struct {
+	config        *FrameworkConfig
+	pool          *pgxpool.Pool
+	tracer        trace.Tracer
+	metrics       MetricsCollector
+	toolRegistry  ToolRegistry
+	sessionManager SessionManager
+	jobQueue      JobQueue
+	rateLimiter   RateLimiter
+	auditLogger   AuditLogger
+}
+
+// NewFramework creates a new Ragivka framework instance
+func NewFramework(config *FrameworkConfig) (*Framework, error) {
+	return &Framework{}, nil
+}
+
+// Start initializes the framework components
+func (f *Framework) Start(ctx context.Context) error {
+	return nil
+}
+
+// Stop shuts down the framework
+func (f *Framework) Stop(ctx context.Context) error {
+	return nil
+}
+
+// ProcessMessage handles incoming messages for a tenant session
+func (f *Framework) ProcessMessage(ctx context.Context, tenant TenantID, session SessionID, message string) (*RAGResponse, error) {
+	return &RAGResponse{}, nil
+}
+
+// CreateSession initializes a new conversation session
+func (f *Framework) CreateSession(ctx context.Context, tenant TenantID, initialMessage string) (SessionID, error) {
+	return "", nil
+}
+
+// GetSession retrieves the current state of a conversation session
+func (f *Framework) GetSession(ctx context.Context, tenant TenantID, session SessionID) (*ConversationSession, error) {
+	return &ConversationSession{}, nil
+}
+
+// UpdateSession updates the state of a conversation session
+func (f *Framework) UpdateSession(ctx context.Context, tenant TenantID, session *ConversationSession) error {
+	return nil
+}
+
+// TransitionState transitions the FSM to a new state
+func (f *Framework) TransitionState(ctx context.Context, tenant TenantID, sessionID SessionID, toState FSMState) error {
+	return nil
+}
+
+// HandleToolExecution executes a registered tool with given arguments
+func (f *Framework) HandleToolExecution(ctx context.Context, tenant TenantID, sessionID SessionID, toolName ToolName, args map[string]interface{}) (interface{}, error) {
+	return nil, nil
+}
+
+// EnqueueJob submits a background job to the queue
+func (f *Framework) EnqueueJob(ctx context.Context, job river.JobArgs) error {
+	return nil
+}
+
+// ValidateInput validates user input against security policies
+func (f *Framework) ValidateInput(ctx context.Context, tenant TenantID, input string) error {
+	return nil
+}

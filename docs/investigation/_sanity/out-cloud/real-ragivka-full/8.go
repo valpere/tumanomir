@@ -1,0 +1,575 @@
+package ragivka
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"io"
+	"net/http"
+	"time"
+)
+
+type TenantID string
+type UserID string
+type SessionID string
+type MessageID string
+type DocumentID string
+type ChunkID string
+type ArtifactID string
+type JobID string
+type PromptName string
+type PromptVersion string
+type ToolName string
+type IdempotencyKey string
+type TraceID string
+
+type OrchestrationTier int
+
+const (
+	TierL0 OrchestrationTier = iota
+	TierL1
+	TierL2
+	TierL3
+)
+
+type SessionState string
+
+const (
+	StateActive          SessionState = "Active"
+	StateWaitingForHuman SessionState = "WaitingForHuman"
+	StateCompleted       SessionState = "Completed"
+	StateExpired         SessionState = "Expired"
+)
+
+type ToolPermission string
+
+const (
+	PermissionRead  ToolPermission = "Read"
+	PermissionDraft ToolPermission = "Draft"
+	PermissionWrite ToolPermission = "Write"
+)
+
+type IngestionStatus string
+
+const (
+	StatusPending  IngestionStatus = "pending"
+	StatusIndexed  IngestionStatus = "indexed"
+	StatusStale    IngestionStatus = "stale"
+	StatusFailed   IngestionStatus = "failed"
+)
+
+type Tenant struct {
+	ID        TenantID
+	Name      string
+	CreatedAt time.Time
+	Settings  TenantSettings
+}
+
+type TenantSettings struct {
+	RateLimitRPM         int
+	LLMCostBudgetCents   int
+	SessionTimeout       time.Duration
+	ApprovalTimeout      time.Duration
+	DefaultEmbeddingModel string
+}
+
+type User struct {
+	ID        UserID
+	TenantID  TenantID
+	Channel   ChannelType
+	ChannelID string
+	Metadata  json.RawMessage
+}
+
+type ChannelType string
+
+const (
+	ChannelTelegram ChannelType = "telegram"
+	ChannelWeb      ChannelType = "web"
+)
+
+type Session struct {
+	ID               SessionID
+	TenantID         TenantID
+	UserID           UserID
+	State            SessionState
+	Version          int
+	Tier             OrchestrationTier
+	Channel          ChannelType
+	ExpiresAt        time.Time
+	ContextPolicy    ContextRetentionPolicy
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type ContextRetentionPolicy struct {
+	MaxTurns    int
+	MaxTokens   int
+	SummarizeAt int
+}
+
+type Message struct {
+	ID            MessageID
+	TenantID      TenantID
+	SessionID     SessionID
+	Role          MessageRole
+	Content       string
+	CitationRefs  []ChunkID
+	TokenCount    int
+	JobID         *JobID
+	ToolCalls     []ToolCallRecord
+	CreatedAt     time.Time
+}
+
+type MessageRole string
+
+const (
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+	RoleSystem    MessageRole = "system"
+	RoleTool      MessageRole = "tool"
+)
+
+type Document struct {
+	ID             DocumentID
+	TenantID       TenantID
+	S3Key          string
+	Name           string
+	Version        int
+	IngestionStatus IngestionStatus
+	Metadata       json.RawMessage
+	CreatedAt      time.Time
+}
+
+type Chunk struct {
+	ID           ChunkID
+	TenantID     TenantID
+	DocumentID   DocumentID
+	Ordinal      int
+	Content      string
+	Vector       []float32
+	TSVector     string
+	SourceLocation string
+	Metadata     json.RawMessage
+}
+
+type Artifact struct {
+	ID         ArtifactID
+	TenantID   TenantID
+	SessionID  SessionID
+	S3Key      string
+	Type       string
+	CreatedAt  time.Time
+}
+
+type Prompt struct {
+	Name      PromptName
+	Version   PromptVersion
+	Content   string
+	CreatedAt time.Time
+}
+
+type AuditLog struct {
+	ID              string
+	TenantID        TenantID
+	UserID          UserID
+	SessionID       SessionID
+	ToolName        ToolName
+	Permission      ToolPermission
+	IdempotencyKey  IdempotencyKey
+	RequestHash     string
+	ResponseHash    string
+	ApprovalRecord  *ApprovalRecord
+	TraceID         TraceID
+	CreatedAt       time.Time
+}
+
+type ApprovalRecord struct {
+	ApprovedBy UserID
+	ApprovedAt time.Time
+	Decision   string
+}
+
+type RiverJob struct {
+	ID             JobID
+	TenantID       TenantID
+	SessionID      SessionID
+	IdempotencyKey IdempotencyKey
+	JobType        string
+	Payload        json.RawMessage
+	Attempt        int
+	MaxAttempts    int
+	State          string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type RateLimitConfig struct {
+	TenantID  TenantID
+	Window    time.Duration
+	MaxTokens int
+}
+
+type LLMProvider string
+
+const (
+	ProviderOpenAI    LLMProvider = "openai"
+	ProviderAnthropic LLMProvider = "anthropic"
+	ProviderOpenRouter LLMProvider = "openrouter"
+	ProviderGemini    LLMProvider = "gemini"
+	ProviderOllama    LLMProvider = "ollama"
+)
+
+type ModelRouter interface {
+	Route(ctx context.Context, task TaskComplexity, input GenerateInput) (GenerateOutput, error)
+}
+
+type TaskComplexity int
+
+const (
+	TaskSimple TaskComplexity = iota
+	TaskComplex
+)
+
+type GenerateInput struct {
+	Prompt       string
+	SystemPrompt string
+	Schema       json.RawMessage
+	MaxTokens    int
+}
+
+type GenerateOutput struct {
+	Content      string
+	Structured   json.RawMessage
+	Provider     LLMProvider
+	Model        string
+	PromptTokens int
+	CompTokens   int
+	CostCents    int
+	TraceID      TraceID
+}
+
+type PromptRegistry interface {
+	Load(ctx context.Context, name PromptName, version PromptVersion) (string, error)
+}
+
+type Retriever interface {
+	Retrieve(ctx context.Context, tenantID TenantID, query string, topK int) ([]RetrievalResult, error)
+}
+
+type RetrievalResult struct {
+	Chunk       Chunk
+	Score       float64
+	Rank        int
+	CitationText string
+}
+
+type ReRanker interface {
+	ReRank(ctx context.Context, query string, results []RetrievalResult, topK int) ([]RetrievalResult, error)
+}
+
+type ToolCallRecord struct {
+	ToolName   ToolName
+	Permission ToolPermission
+	Input      json.RawMessage
+	Output     json.RawMessage
+	ExecutedAt time.Time
+}
+
+type Tool interface {
+	Name() ToolName
+	Permission() ToolPermission
+	Schema() json.RawMessage
+	Execute(ctx context.Context, input json.RawMessage) (json.RawMessage, error)
+}
+
+type ToolRegistry interface {
+	Register(tool Tool) error
+	Get(name ToolName) (Tool, error)
+	List() []Tool
+}
+
+type ReadTool interface {
+	Tool
+	CacheTTL() time.Duration
+}
+
+type DraftTool interface {
+	Tool
+}
+
+type WriteTool interface {
+	Tool
+	Idempotency(input json.RawMessage) IdempotencyKey
+}
+
+type Cache interface {
+	Get(ctx context.Context, key string) ([]byte, error)
+	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
+}
+
+type GraphEngine interface {
+	Execute(ctx context.Context, graph Graph) (GraphResult, error)
+}
+
+type Graph struct {
+	Nodes []Node
+	Edges []Edge
+}
+
+type Node struct {
+	ID      string
+	Type    NodeType
+	Timeout time.Duration
+	Handler NodeHandler
+}
+
+type NodeType string
+
+const (
+	NodeGenerator NodeType = "generator"
+	NodeCritic    NodeType = "critic"
+	NodeReviewer  NodeType = "reviewer"
+	NodeTool      NodeType = "tool"
+)
+
+type Edge struct {
+	From string
+	To   string
+}
+
+type NodeHandler func(ctx context.Context, state GraphState) (GraphState, error)
+
+type GraphState map[string]json.RawMessage
+
+type GraphResult struct {
+	FinalState GraphState
+	Trace      []NodeTrace
+}
+
+type NodeTrace struct {
+	NodeID    string
+	Input     json.RawMessage
+	Output    json.RawMessage
+	StartedAt time.Time
+	EndedAt   time.Time
+}
+
+type HITLGate interface {
+	RequestApproval(ctx context.Context, sessionID SessionID, toolName ToolName, reason string) error
+	Resolve(ctx context.Context, sessionID SessionID, decision ApprovalDecision) error
+}
+
+type ApprovalDecision string
+
+const (
+	DecisionApproved ApprovalDecision = "approved"
+	DecisionRejected ApprovalDecision = "rejected"
+)
+
+type SessionManager interface {
+	Create(ctx context.Context, tenantID TenantID, userID UserID, tier OrchestrationTier, channel ChannelType) (Session, error)
+	Load(ctx context.Context, tenantID TenantID, sessionID SessionID) (Session, error)
+	Transition(ctx context.Context, session Session, newState SessionState) (Session, error)
+	AppendMessage(ctx context.Context, sessionID SessionID, msg Message) error
+	GetMessages(ctx context.Context, sessionID SessionID, limit int) ([]Message, error)
+	ExpireInactive(ctx context.Context, before time.Time) error
+}
+
+type ConversationsAPI interface {
+	SendMessage(ctx context.Context, tenantID TenantID, sessionID SessionID, content string) (*Message, error)
+	GetHistory(ctx context.Context, tenantID TenantID, sessionID SessionID) ([]Message, error)
+}
+
+type AuthService interface {
+	AuthenticateAPIKey(ctx context.Context, key string) (TenantID, error)
+	AuthenticateJWT(ctx context.Context, token string) (TenantID, UserID, error)
+}
+
+type RateLimiter interface {
+	Allow(ctx context.Context, tenantID TenantID) (bool, error)
+}
+
+type ChannelAdapter interface {
+	Receive(w http.ResponseWriter, r *http.Request) error
+	Send(ctx context.Context, channelID string, message ChannelMessage) error
+}
+
+type ChannelMessage struct {
+	Text      string
+	HTML      string
+	Keyboard  [][]KeyboardButton
+}
+
+type KeyboardButton struct {
+	Text         string
+	CallbackData string
+}
+
+type TelegramAdapter struct {
+	BotToken string
+}
+
+func (a *TelegramAdapter) Receive(w http.ResponseWriter, r *http.Request) error {
+	return nil
+}
+
+func (a *TelegramAdapter) Send(ctx context.Context, channelID string, message ChannelMessage) error {
+	return nil
+}
+
+type WebWidgetAPI struct{}
+
+func (w *WebWidgetAPI) Register(mux *http.ServeMux) {}
+
+type IngestionPipeline interface {
+	Upload(ctx context.Context, tenantID TenantID, filename string, reader io.Reader) (DocumentID, error)
+	Reindex(ctx context.Context, documentID DocumentID) error
+}
+
+type Parser interface {
+	Parse(ctx context.Context, reader io.Reader, mimeType string) (string, error)
+}
+
+type Chunker interface {
+	Chunk(ctx context.Context, text string) ([]ChunkInput, error)
+}
+
+type ChunkInput struct {
+	Content        string
+	Ordinal        int
+	SourceLocation string
+}
+
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+type ObjectStorage interface {
+	Put(ctx context.Context, key string, reader io.Reader) error
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, key string) error
+}
+
+type ArtifactGenerator interface {
+	GeneratePDF(ctx context.Context, data json.RawMessage) (ArtifactID, error)
+	GenerateExcel(ctx context.Context, data json.RawMessage) (ArtifactID, error)
+}
+
+type Critic interface {
+	Evaluate(ctx context.Context, answer string, chunks []Chunk) (EvaluationResult, error)
+}
+
+type EvaluationResult struct {
+	RecallAtK      float64
+	CitationCoverage float64
+	Groundedness   float64
+	Issues         []string
+}
+
+type MetricsCollector interface {
+	RecordLLMTokens(ctx context.Context, provider LLMProvider, model string, promptTokens, compTokens int) error
+	RecordRetrievalLatency(ctx context.Context, tenantID TenantID, duration time.Duration) error
+	RecordQueueDepth(ctx context.Context, queue string, depth int) error
+	RecordError(ctx context.Context, component string) error
+}
+
+type Tracer interface {
+	StartSpan(ctx context.Context, name string) (context.Context, Span)
+}
+
+type Span interface {
+	End()
+	SetError(err error)
+}
+
+type PIISanitizer interface {
+	Sanitize(ctx context.Context, text string) (string, error)
+}
+
+type JSONSchemaValidator interface {
+	Validate(ctx context.Context, schema json.RawMessage, data json.RawMessage) error
+}
+
+type Config struct {
+	DatabaseURL       string
+	RedisURL          string
+	ObjectStorageURL  string
+	APIPort           int
+	WorkerMode        bool
+	APIMode           bool
+	OfflineMode       bool
+	LLMProviders      map[LLMProvider]ProviderConfig
+	DefaultProvider   LLMProvider
+}
+
+type ProviderConfig struct {
+	APIKey  string
+	BaseURL string
+	Model   string
+}
+
+type RagivkaRuntime struct {
+	Config         Config
+	SessionManager SessionManager
+	ToolRegistry   ToolRegistry
+	ModelRouter    ModelRouter
+	Retriever      Retriever
+	Conversations  ConversationsAPI
+	Auth           AuthService
+	RateLimiter    RateLimiter
+	JobQueue       JobQueue
+	Tracer         Tracer
+	Metrics        MetricsCollector
+}
+
+type JobQueue interface {
+	Insert(ctx context.Context, job RiverJob) error
+	Claim(ctx context.Context) (RiverJob, error)
+	Complete(ctx context.Context, jobID JobID) error
+	Fail(ctx context.Context, jobID JobID, err error) error
+}
+
+func NewRuntime(cfg Config) (*RagivkaRuntime, error) {
+	return nil, nil
+}
+
+func (r *RagivkaRuntime) StartServer(ctx context.Context) error {
+	return nil
+}
+
+func (r *RagivkaRuntime) StartWorker(ctx context.Context) error {
+	return nil
+}
+
+func HandleL0Request(ctx context.Context, rt *RagivkaRuntime, tenantID TenantID, prompt PromptName, input string) (Message, error) {
+	return Message{}, nil
+}
+
+func HandleL1Request(ctx context.Context, rt *RagivkaRuntime, tenantID TenantID, sessionID SessionID, input string) (Message, error) {
+	return Message{}, nil
+}
+
+func HandleL2Job(ctx context.Context, rt *RagivkaRuntime, job RiverJob) error {
+	return nil
+}
+
+func HandleL3Graph(ctx context.Context, rt *RagivkaRuntime, sessionID SessionID, input string) (GraphResult, error) {
+	return GraphResult{}, nil
+}
+
+func HybridSearch(ctx context.Context, db *sql.DB, tenantID TenantID, query string, topK int) ([]RetrievalResult, error) {
+	return nil, nil
+}
+
+func TrackAuditLog(ctx context.Context, db *sql.DB, log AuditLog) error {
+	return nil
+}
+
+func CheckIdempotency(ctx context.Context, db *sql.DB, key IdempotencyKey) (bool, error) {
+	return false, nil
+}
+
+func GenerateIdempotencyKey(tenantID TenantID, toolName ToolName, input json.RawMessage) IdempotencyKey {
+	return ""
+}

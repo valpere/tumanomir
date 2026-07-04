@@ -1,0 +1,73 @@
+package payments
+
+import "context"
+
+type ProviderID string
+
+const (
+	ProviderStripe     ProviderID = "stripe"
+	ProviderPayPal     ProviderID = "paypal"
+	ProviderLiqPay     ProviderID = "liqpay"
+)
+
+type TransactionStatus string
+
+const (
+	StatusPending   TransactionStatus = "pending"
+	StatusSuccess   TransactionStatus = "success"
+	StatusFailed    TransactionStatus = "failed"
+	StatusCancelled TransactionStatus = "cancelled"
+)
+
+type Money struct {
+	Amount   int64
+	Currency string
+}
+
+type Transaction struct {
+	ID            string
+	ProviderID    ProviderID
+	Amount        Money
+	Description   string
+	CustomerRef   string
+	ExternalRef   string
+	Status        TransactionStatus
+	ProviderData  map[string]string
+}
+
+type PaymentResult struct {
+	TransactionID string
+	Status        TransactionStatus
+	ExternalRef   string
+	Error         error
+}
+
+type Provider interface {
+	ID() ProviderID
+	Charge(ctx context.Context, tx Transaction) PaymentResult
+	Refund(ctx context.Context, tx Transaction) PaymentResult
+}
+
+type Logger interface {
+	LogSuccess(ctx context.Context, op string, tx Transaction, result PaymentResult)
+	LogFailure(ctx context.Context, op string, tx Transaction, result PaymentResult)
+}
+
+type Processor struct {
+	providers map[ProviderID]Provider
+	logger    Logger
+}
+
+func NewProcessor(logger Logger) *Processor {
+	return nil
+}
+
+func (p *Processor) RegisterProvider(provider Provider) {}
+
+func (p *Processor) Charge(ctx context.Context, tx Transaction) PaymentResult {
+	return PaymentResult{}
+}
+
+func (p *Processor) Refund(ctx context.Context, tx Transaction) PaymentResult {
+	return PaymentResult{}
+}
