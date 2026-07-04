@@ -22,15 +22,22 @@ func captureStdout(t *testing.T, fn func() int) (string, int) {
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 
+	// Drain the pipe concurrently: the OS pipe buffer is finite (~64KB on
+	// Linux), so reading only after fn() returns would deadlock once
+	// output exceeds it.
+	readDone := make(chan struct{})
+	var buf bytes.Buffer
+	go func() {
+		io.Copy(&buf, r)
+		close(readDone)
+	}()
+
 	code := fn()
 
 	if err := w.Close(); err != nil {
 		t.Fatalf("close pipe writer: %v", err)
 	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("read pipe: %v", err)
-	}
+	<-readDone
 	return buf.String(), code
 }
 
