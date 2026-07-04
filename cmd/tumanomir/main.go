@@ -69,8 +69,45 @@ func runCheck(args []string) int {
 		return 2
 	}
 
-	// Aggregate counts across files so a corpus is judged as one source
-	// of truth, then report per-file hanging IDs for actionability.
+	cr := aggregate(specs, th)
+
+	if cr.KDVerdict == internal.VerdictSkipped {
+		fmt.Printf("  K_drift:  —     [n/a]%s(no [REQ-*] tags found)\n", pad(cr.KDVerdict))
+	} else {
+		fmt.Printf("  K_drift:  %.2f  [%s]%s(threshold %.2f, %d/%d requirements untraced)\n",
+			cr.KD.Value, cr.KDVerdict, pad(cr.KDVerdict), th.KDriftMax, cr.KD.Hanging, cr.KD.Requirements)
+	}
+	fmt.Printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
+		cr.DC.Value, cr.DCVerdict, pad(cr.DCVerdict), th.DConstMin, cr.DC.ConstraintMarkers, cr.DC.ProseTokens)
+	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)\n")
+
+	for _, id := range cr.KD.HangingIDs {
+		fmt.Printf("    hanging: %s\n", id)
+	}
+
+	if cr.KDVerdict == internal.VerdictBlock {
+		fmt.Println("\nexit code: 1 (gate failed)")
+		return 1
+	}
+	return 0
+}
+
+// checkResult holds the deterministic layer's aggregated metric values and
+// their gate verdicts, computed by aggregate.
+//
+// TODO(REQ-OUT-01): move to internal/report once that package exists
+type checkResult struct {
+	KD        internal.KDriftResult
+	DC        internal.DConstResult
+	KDVerdict internal.Verdict
+	DCVerdict internal.Verdict
+}
+
+// aggregate combines K_drift and D_const across specs so a multi-file
+// corpus is judged as one source of truth, then computes gate verdicts
+// against th. Per-file hanging requirement IDs are prefixed with their
+// source path for actionable output.
+func aggregate(specs []spec.Spec, th internal.Thresholds) checkResult {
 	var kd internal.KDriftResult
 	var dc internal.DConstResult
 	for _, s := range specs {
@@ -106,25 +143,7 @@ func runCheck(args []string) int {
 		dcVerdict = internal.VerdictWarn // lexical proxy: advisory, not a gate
 	}
 
-	if kdVerdict == internal.VerdictSkipped {
-		fmt.Printf("  K_drift:  —     [n/a]%s(no [REQ-*] tags found)\n", pad(kdVerdict))
-	} else {
-		fmt.Printf("  K_drift:  %.2f  [%s]%s(threshold %.2f, %d/%d requirements untraced)\n",
-			kd.Value, kdVerdict, pad(kdVerdict), th.KDriftMax, kd.Hanging, kd.Requirements)
-	}
-	fmt.Printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
-		dc.Value, dcVerdict, pad(dcVerdict), th.DConstMin, dc.ConstraintMarkers, dc.ProseTokens)
-	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)\n")
-
-	for _, id := range kd.HangingIDs {
-		fmt.Printf("    hanging: %s\n", id)
-	}
-
-	if kdVerdict == internal.VerdictBlock {
-		fmt.Println("\nexit code: 1 (gate failed)")
-		return 1
-	}
-	return 0
+	return checkResult{KD: kd, DC: dc, KDVerdict: kdVerdict, DCVerdict: dcVerdict}
 }
 
 // pad aligns verdict columns for ok/warn/block widths.
