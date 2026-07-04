@@ -46,7 +46,7 @@ func TestRunCheckNoRequirementsIsSkipped(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("want exit code 0 for a spec with zero requirements, got %d\noutput:\n%s", code, out)
 	}
-	want := "  K_drift:  —     [n/a]  (no [REQ-*] tags found)\n"
+	want := "  K_drift:  —     [n/a]    (no [REQ-*] tags found)\n"
 	if !strings.Contains(out, want) {
 		t.Fatalf("want K_drift line %q, got output:\n%s", want, out)
 	}

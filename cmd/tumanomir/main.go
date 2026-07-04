@@ -135,7 +135,7 @@ func pad(v internal.Verdict) string {
 	case internal.VerdictWarn:
 		return "   "
 	case internal.VerdictSkipped:
-		return "  "
+		return "    "
 	default:
 		return "  "
 	}
