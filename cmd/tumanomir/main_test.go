@@ -644,8 +644,14 @@ func TestPrintMeasureResultSkippedVerdict(t *testing.T) {
 			Prompt:       "abcde",
 		},
 		DPairVerdict: internal.VerdictSkipped,
-		DiscardRate:  0.8,
-		DiscardWarn:  false,
+		// DiscardRate is deliberately above discardWarnThreshold while
+		// DiscardWarn is false: this fixture only exercises the
+		// VerdictSkipped rendering branch of printMeasureResult, not the
+		// discard-warning branch (covered separately by
+		// TestPrintMeasureResultDiscardWarningVisibility) — a real
+		// runMeasureWithGenerator run would set DiscardWarn=true here.
+		DiscardRate: 0.8,
+		DiscardWarn: false,
 	}
 
 	out, _ := captureStdout(t, func() int { printMeasureResult(mr, testThresholds); return 0 })
@@ -666,6 +672,12 @@ func TestPrintMeasureResultSkippedVerdict(t *testing.T) {
 	}
 	if strings.Contains(out, "D_pair:   0.00") {
 		t.Fatalf("skipped verdict must not render a numeric D_pair value, got:\n%s", out)
+	}
+	if strings.Contains(out, "H:        0.00") {
+		t.Fatalf("skipped verdict must not render a numeric H value, got:\n%s", out)
+	}
+	if strings.Contains(out, "H_norm:   0.00") {
+		t.Fatalf("skipped verdict must not render a numeric H_norm value, got:\n%s", out)
 	}
 }
 

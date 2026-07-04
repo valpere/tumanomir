@@ -222,6 +222,18 @@ func TestOllamaHTTPClientNotOverriddenWhenCallerSupplied(t *testing.T) {
 // context.Canceled through Generate's fmt.Errorf("...: %w", err) wrapping
 // (Go's http.Client wraps context.Canceled in a *url.Error, and errors.Is
 // unwraps through it via *url.Error's Unwrap method).
+//
+// A fix-review pass (kimi-k2.6:cloud) suggested replacing the fixed
+// time.Sleep + elapsed-time assertion below with a handler that blocks on
+// <-r.Context().Done(), reasoning it would remove the wall-clock race
+// entirely. Tried it: it hangs. The server's request context does not get
+// cancelled promptly (if ever, in this httptest setup) just because the
+// *client's* context was cancelled and http.Client aborted the round trip
+// — httptest.Server.Close() then blocks forever waiting for the handler to
+// return, timing out the whole test binary. Reverted; kept as time.Sleep
+// with generous margins instead (tech-lead-verified: cancel at 30ms,
+// assertion ceiling 300ms, server responds at 500ms — 270ms slack above
+// the cancel point, 200ms below the server delay).
 func TestOllamaGenerateContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
