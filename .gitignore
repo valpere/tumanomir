@@ -31,9 +31,10 @@ go.work.sum
 .idea/
 .vscode/
 
-# Compiled binary in repo root only (anchored — an unanchored "tumanomir"
-# here would also match cmd/tumanomir/, silently untracking the CLI source).
-/tumanomir
+# Compiled binaries — built via `make build` into bin/, never the repo root
+# (an earlier unanchored root-level ignore here once shadowed cmd/tumanomir/
+# itself; keep this anchored and scoped to bin/ only).
+/bin/
 *.test
 
 # Session recall — per-project, local-only context log
