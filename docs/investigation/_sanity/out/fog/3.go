@@ -1,0 +1,56 @@
+package payment
+
+import (
+	"time"
+)
+
+type PaymentProvider string
+
+const (
+	ProviderStripe    PaymentProvider = "stripe"
+	ProviderPayPal    PaymentProvider = "paypal"
+	ProviderBankTrans PaymentProvider = "bank_transfer"
+)
+
+type TransactionStatus string
+
+const (
+	StatusSuccess TransactionStatus = "success"
+	StatusFailed  TransactionStatus = "failed"
+	StatusPending TransactionStatus = "pending"
+)
+
+type Transaction struct {
+	ID          string          `json:"id"`
+	Amount      float64         `json:"amount"`
+	Currency    string          `json:"currency"`
+	Provider    PaymentProvider `json:"provider"`
+	Status      TransactionStatus `json:"status"`
+	Description string          `json:"description"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type PaymentRequest struct {
+	Amount      float64         `json:"amount"`
+	Currency    string          `json:"currency"`
+	Provider    PaymentProvider `json:"provider"`
+	Description string          `json:"description"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type PaymentResponse struct {
+	Transaction *Transaction `json:"transaction,omitempty"`
+	Error       error        `json:"error,omitempty"`
+}
+
+type Logger interface {
+	LogTransaction(transaction *Transaction)
+	LogError(err error, transactionID string)
+}
+
+type PaymentProcessor interface {
+	ProcessPayment(request PaymentRequest) PaymentResponse
+	GetTransaction(id string) (*Transaction, error)
+	ListTransactions(provider PaymentProvider, status TransactionStatus, limit int) ([]*Transaction, error)
+}

@@ -1,0 +1,72 @@
+package payments
+
+import (
+	"time"
+)
+
+type UUID = string
+
+type Decimal string
+
+type Currency string
+
+type Provider string
+
+const (
+	ProviderStripe Provider = "stripe"
+	ProviderPayPal Provider = "paypal"
+	ProviderAdyen  Provider = "adyen"
+)
+
+type Status string
+
+const (
+	StatusOK       Status = "ok"
+	StatusDeclined Status = "declined"
+	StatusError    Status = "error"
+)
+
+type TransactionState string
+
+const (
+	StateReceived   TransactionState = "received"
+	StateAuthorized TransactionState = "authorized"
+	StateCaptured   TransactionState = "captured"
+	StateDeclined   TransactionState = "declined"
+)
+
+type Transaction struct {
+	ID             UUID
+	Amount         Decimal
+	Currency       Currency
+	Provider       Provider
+	IdempotencyKey UUID
+}
+
+type Receipt struct {
+	ID            UUID
+	TransactionID UUID
+	Status        Status
+	State         TransactionState
+	Amount        Decimal
+	Currency      Currency
+	Provider      Provider
+	CreatedAt     time.Time
+}
+
+type PaymentLog struct {
+	TxID       UUID
+	Status     Status
+	ErrorCode  *string
+	CreatedAt  time.Time
+}
+
+type PaymentService struct{}
+
+func (s *PaymentService) AcceptTransaction(tx Transaction) (Receipt, error) {
+	return Receipt{}, nil
+}
+
+func (s *PaymentService) LogResult(txID UUID, status Status, errorCode *string) error {
+	return nil
+}

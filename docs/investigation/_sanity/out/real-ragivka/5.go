@@ -1,0 +1,231 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
+)
+
+type TenantID string
+type SessionID string
+type DocumentID string
+type ArtifactID string
+type ToolName string
+type ModelProvider string
+
+type FSMState string
+type ToolPermission string
+
+const (
+	FSMStateActive          FSMState = "active"
+	FSMStateWaitingForHuman FSMState = "waiting_for_human"
+	FSMStateCompleted       FSMState = "completed"
+	FSMStateExpired         FSMState = "expired"
+
+	ToolPermissionRead    ToolPermission = "read"
+	ToolPermissionDraft   ToolPermission = "draft"
+	ToolPermissionWrite   ToolPermission = "write"
+
+	ModelProviderOpenAI   ModelProvider = "openai"
+	ModelProviderAnthropic ModelProvider = "anthropic"
+	ModelProviderGemini   ModelProvider = "gemini"
+	ModelProviderOllama   ModelProvider = "ollama"
+)
+
+type Session struct {
+	ID          SessionID    `json:"id"`
+	TenantID    TenantID     `json:"tenant_id"`
+	State       FSMState     `json:"state"`
+	Version     int64        `json:"version"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	ExpiresAt   time.Time    `json:"expires_at"`
+	Context     []Message    `json:"context"`
+	LastMessage *Message     `json:"last_message,omitempty"`
+}
+
+type Message struct {
+	ID        string    `json:"id"`
+	SessionID SessionID `json:"session_id"`
+	Role      string    `json:"role"` // "user" or "assistant"
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Tool struct {
+	Name        ToolName          `json:"name"`
+	Permissions []ToolPermission  `json:"permissions"`
+	Schema      map[string]any    `json:"schema"`
+	Description string            `json:"description"`
+	CacheTTL    *time.Duration    `json:"cache_ttl,omitempty"`
+}
+
+type ToolExecution struct {
+	ID           string     `json:"id"`
+	SessionID    SessionID  `json:"session_id"`
+	ToolName     ToolName   `json:"tool_name"`
+	Input        map[string]any `json:"input"`
+	Output       map[string]any `json:"output,omitempty"`
+	Error        *string    `json:"error,omitempty"`
+	ExecutedAt   time.Time  `json:"executed_at"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type Document struct {
+	ID           DocumentID     `json:"id"`
+	TenantID     TenantID       `json:"tenant_id"`
+	Name         string         `json:"name"`
+	Size         int64          `json:"size"`
+	ContentType  string         `json:"content_type"`
+	CreatedAt    time.Time      `json:"created_at"`
+	Chunks       []DocumentChunk `json:"chunks"`
+}
+
+type DocumentChunk struct {
+	ID           string     `json:"id"`
+	DocumentID   DocumentID `json:"document_id"`
+	Content      string     `json:"content"`
+	Ordinal      int        `json:"ordinal"`
+	StartPosition int       `json:"start_position"`
+	EndPosition   int       `json:"end_position"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+}
+
+type Artifact struct {
+	ID          ArtifactID   `json:"id"`
+	TenantID    TenantID     `json:"tenant_id"`
+	Name        string       `json:"name"`
+	Size        int64        `json:"size"`
+	ContentType string       `json:"content_type"`
+	CreatedAt   time.Time    `json:"created_at"`
+	URL         string       `json:"url"`
+}
+
+type Job struct {
+	ID           string     `json:"id"`
+	TenantID     TenantID   `json:"tenant_id"`
+	Type         string     `json:"type"`
+	Payload      map[string]any `json:"payload"`
+	State        string     `json:"state"`
+	Attempts     int        `json:"attempts"`
+	MaxAttempts  int        `json:"max_attempts"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+}
+
+type AuditLog struct {
+	ID             string     `json:"id"`
+	TenantID       TenantID   `json:"tenant_id"`
+	IdempotencyKey string     `json:"idempotency_key"`
+	ToolName       ToolName   `json:"tool_name"`
+	RequestHash    string     `json:"request_hash"`
+	ResponseHash   string     `json:"response_hash"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+type Prompt struct {
+	Name    string     `json:"name"`
+	Version string     `json:"version"`
+	Content string     `json:"content"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type ModelRouter interface {
+	Route(ctx context.Context, task string) (string, error)
+	GetModelConfig(modelName string) map[string]any
+}
+
+type ToolRegistry interface {
+	Register(tool Tool) error
+	Get(name ToolName) (*Tool, error)
+	List() []Tool
+	Execute(ctx context.Context, toolName ToolName, input map[string]any) (map[string]any, error)
+}
+
+type SessionManager interface {
+	CreateSession(ctx context.Context, tenantID TenantID) (*Session, error)
+	GetSession(ctx context.Context, sessionID SessionID) (*Session, error)
+	UpdateSession(ctx context.Context, session *Session) error
+	TransitionState(ctx context.Context, sessionID SessionID, newState FSMState, version int64) error
+	ExpireSession(ctx context.Context, sessionID SessionID) error
+	AddMessage(ctx context.Context, sessionID SessionID, message Message) error
+}
+
+type KnowledgeBase interface {
+	IngestDocument(ctx context.Context, tenantID TenantID, doc Document) error
+	SearchChunks(ctx context.Context, tenantID TenantID, query string, limit int) ([]DocumentChunk, error)
+	RerankResults(ctx context.Context, chunks []DocumentChunk, query string) ([]DocumentChunk, error)
+	GetDocument(ctx context.Context, documentID DocumentID) (*Document, error)
+}
+
+type ArtifactGenerator interface {
+	GeneratePDF(ctx context.Context, content string, metadata map[string]any) (*Artifact, error)
+	GenerateExcel(ctx context.Context, data [][]string, headers []string) (*Artifact, error)
+}
+
+type ChannelAdapter interface {
+	HandleMessage(ctx context.Context, tenantID TenantID, message Message) error
+	SendResponse(ctx context.Context, sessionID SessionID, response string) error
+}
+
+type APIService interface {
+	CreateSession(ctx context.Context, tenantID TenantID) (SessionID, error)
+	SendMessage(ctx context.Context, sessionID SessionID, content string) error
+	GetSession(ctx context.Context, sessionID SessionID) (*Session, error)
+	ListSessions(ctx context.Context, tenantID TenantID) ([]*Session, error)
+}
+
+type WorkerService interface {
+	ProcessJob(ctx context.Context, job *Job) error
+	QueueJob(ctx context.Context, job *Job) error
+}
+
+type RiverWorker struct {
+	// River worker fields
+}
+
+func (r *RiverWorker) Start(ctx context.Context, pool *pgxpool.Pool) error { return nil }
+func (r *RiverWorker) Stop(ctx context.Context) error                      { return nil }
+
+type Tracer interface {
+	Extract(ctx context.Context, span trace.Span) error
+	Inject(ctx context.Context, span trace.Span) error
+}
+
+type MetricsCollector interface {
+	RecordTokenUsage(ctx context.Context, tenantID TenantID, promptTokens int, completionTokens int)
+	RecordRetrievalLatency(ctx context.Context, tenantID TenantID, duration time.Duration)
+	RecordQueueDepth(ctx context.Context, depth int)
+	RecordErrorRate(ctx context.Context, tenantID TenantID, err error)
+}
+
+type Error struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+func (e *Error) Error() string { return e.Message }
+
+type Service struct {
+	SessionManager   SessionManager
+	KnowledgeBase    KnowledgeBase
+	ToolRegistry     ToolRegistry
+	ModelRouter      ModelRouter
+	ArtifactGenerator ArtifactGenerator
+	ChannelAdapter   ChannelAdapter
+	APIService       APIService
+	WorkerService    WorkerService
+	MetricsCollector MetricsCollector
+	Tracer           Tracer
+}
+
+func (s *Service) Initialize(ctx context.Context) error { return nil }
+func (s *Service) Shutdown(ctx context.Context) error   { return nil }
+func (s *Service) ProcessRequest(ctx context.Context, tenantID TenantID, sessionID SessionID, message string) (*Session, error) { return nil, nil }
+func (s *Service) ExecuteTool(ctx context.Context, toolName ToolName, input map[string]any) (map[string]any, error) { return nil, nil }
+func (s *Service) GenerateResponse(ctx context.Context, sessionID SessionID, prompt string) (string, error) { return "", nil }

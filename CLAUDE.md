@@ -8,8 +8,11 @@
 1. Прочитай `docs/requirements.md` — **специфікація первинна**; код пишеться
    під неї, а не навпаки. Вона в розмітці самого tumanomir
    (`[REQ-*] -> [FUN-*]`, `@schema`) — dogfooding.
-2. `context/history.md` (у `../context/`, поза репо) — провенанс проєкту:
-   звідки методологія, які рішення вже ухвалені й чому.
+2. `docs/investigation/history.md` — провенанс проєкту: звідки методологія,
+   які рішення вже ухвалені й чому. `docs/investigation/design.md` — дизайн
+   v0.1. Усе, що потрібно рецензенту чи стороннньому агенту, лежить у
+   репозиторії (`/home/val/wrk/projects/tumanomir/tumanomir`) — на
+   `../context/` більше не посилатися, робоча зона рецензій обмежена репо.
 3. Поточний стан коду — spike детермінованого ядра + порт dispersion
    з експерименту статті; звіряй з requirements, розбіжність — це баг
    або в коді, або в requirements (спершу онови requirements).
@@ -50,5 +53,8 @@ make ci        # build + vet + test + lint + dogfood, усе разом
 - Код/коментарі/повідомлення — English; спілкування в сесії — українська.
 - Гілки: `<type>-<slug>` від main; у main напряму не комітити.
 - Reference-дані для тестів dispersion: згенеровані файли з експерименту
-  статті — `~/wrk/promo/source_of_the_unknown/sanity/out*/` (120 файлів,
-  реальні еталонні числа в `sanity/README.md` там само).
+  статті — `docs/investigation/_sanity/out*/` (120 файлів, тепер у репо;
+  `_`-префікс — щоб `go build ./...`/`go vet ./...` це ігнорували, це не
+  Go-пакети). Реальні еталонні числа в `docs/investigation/_sanity/README.md`.
+  Оригінальна стаття — `docs/investigation/SourceOfTheUnknown.md`; 11 звітів
+  зовнішніх рецензій — `docs/investigation/reports/`.

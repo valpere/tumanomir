@@ -1,0 +1,104 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"time"
+)
+
+type SessionIndexer struct{}
+
+type Chunk struct {
+	ID          int64     `json:"id"`
+	SessionID   string    `json:"session_id"`
+	ProjectRoot string    `json:"project_root"`
+	Role        string    `json:"role"`
+	Content     string    `json:"content"`
+	Date        time.Time `json:"date"`
+	Embedded    bool      `json:"embedded"`
+	Deferred    bool      `json:"deferred"`
+}
+
+type SearchResult struct {
+	ID        int64     `json:"id"`
+	SessionID string    `json:"session_id"`
+	Role      string    `json:"role"`
+	Date      time.Time `json:"date"`
+	Snippet   string    `json:"snippet"`
+	Score     float64   `json:"score"`
+}
+
+type MineResult struct {
+	ChunksIndexed int `json:"chunks_indexed"`
+	EmbeddingsDone int `json:"embeddings_done"`
+	EmbeddingsSkipped int `json:"embeddings_skipped"`
+	EmbeddingsDeferred int `json:"embeddings_deferred"`
+}
+
+func (s *SessionIndexer) Mine(ctx context.Context, jsonlPath string, dbPath string) (*MineResult, error) { return nil }
+
+func (s *SessionIndexer) Search(ctx context.Context, query string, dbPath string, limit int, jsonOutput bool) ([]SearchResult, error) { return nil, nil }
+
+func (s *SessionIndexer) Embed(ctx context.Context, dbPath string) error { return nil }
+
+func (s *SessionIndexer) Stats(ctx context.Context, dbPath string) (map[string]interface{}, error) { return nil, nil }
+
+type ChunkRecord struct {
+	ID          int64     `json:"id"`
+	SessionID   string    `json:"session_id"`
+	ProjectRoot string    `json:"project_root"`
+	Role        string    `json:"role"`
+	Content     string    `json:"content"`
+	Date        time.Time `json:"date"`
+	Embedded    bool      `json:"embedded"`
+	Deferred    bool      `json:"deferred"`
+}
+
+type EmbeddingRecord struct {
+	ID        int64     `json:"id"`
+	ChunkID   int64     `json:"chunk_id"`
+	Vector    []float32 `json:"vector"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type SessionRecord struct {
+	ID        string    `json:"id"`
+	ProjectRoot string  `json:"project_root"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ProjectIndex struct {
+	ProjectRoot string
+	DB          *sql.DB
+}
+
+func NewProjectIndex(projectRoot string) (*ProjectIndex, error) { return nil, nil }
+
+func (p *ProjectIndex) Close() error { return nil }
+
+func (p *ProjectIndex) GetSessionIDFromJSONL(jsonlPath string) (string, error) { return "", nil }
+
+func (p *ProjectIndex) IsSessionIndexed(sessionID string) (bool, error) { return false, nil }
+
+func (p *ProjectIndex) InsertChunk(chunk Chunk) error { return nil }
+
+func (p *ProjectIndex) GetChunksForSession(sessionID string) ([]ChunkRecord, error) { return nil, nil }
+
+func (p *ProjectIndex) UpdateChunkEmbeddedStatus(chunkID int64, embedded bool) error { return nil }
+
+func (p *ProjectIndex) GetPendingEmbeddings() ([]ChunkRecord, error) { return nil, nil }
+
+func (p *ProjectIndex) CreateSchema() error { return nil }
+
+func (p *ProjectIndex) ValidateSchema() error { return nil }
+
+type JSONLParser struct{}
+
+func (j *JSONLParser) Parse(jsonlPath string) ([]json.RawMessage, error) { return nil, nil }
+
+func (j *JSONLParser) ExtractMessages(rawMessages []json.RawMessage) []Chunk { return nil }
+
+func (j *JSONLParser) FilterMessage(msg Chunk) bool { return false }
+
+func (j *JSONLParser) TruncateToWordBoundary(s string, maxLen int) string { return "" }

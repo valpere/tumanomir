@@ -1,0 +1,270 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
+)
+
+type TenantID string
+type SessionID string
+type UserID string
+type DocumentID string
+type ChunkID string
+type MessageID string
+type JobID string
+type ToolName string
+type ArtifactID string
+type PromptVersion string
+
+type State string
+type ChannelType string
+type OrchestrationTier int
+type ToolPermission string
+type EmbeddingModel string
+
+const (
+	StateActive         State = "active"
+	StateWaitingForHuman State = "waiting_for_human"
+	StateCompleted      State = "completed"
+	StateExpired        State = "expired"
+
+	ChannelTelegram ChannelType = "telegram"
+	ChannelWeb      ChannelType = "web"
+
+	TierL0 OrchestrationTier = 0
+	TierL1 OrchestrationTier = 1
+	TierL2 OrchestrationTier = 2
+	TierL3 OrchestrationTier = 3
+
+	ToolRead   ToolPermission = "read"
+	ToolDraft  ToolPermission = "draft"
+	ToolWrite  ToolPermission = "write"
+
+	EmbeddingBgeM3 EmbeddingModel = "bge-m3"
+)
+
+type Session struct {
+	ID                  SessionID
+	TenantID            TenantID
+	UserID              UserID
+	State               State
+	Version             int
+	OrchestrationTier   OrchestrationTier
+	Channel             ChannelType
+	ExpiresAt           time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+type Message struct {
+	ID            MessageID
+	SessionID     SessionID
+	TenantID      TenantID
+	Role          string
+	Content       string
+	CitationRefs  []string
+	TokenCount    int
+	JobID         *JobID
+	CreatedAt     time.Time
+}
+
+type Document struct {
+	ID                  DocumentID
+	TenantID            TenantID
+	S3Key               string
+	Version             string
+	IngestionStatus     string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+type Chunk struct {
+	ID            ChunkID
+	DocumentID    DocumentID
+	TenantID      TenantID
+	Ordinal       int
+	Content       string
+	Vector        []float32
+	TsVector      string
+	Metadata      map[string]interface{}
+	CreatedAt     time.Time
+}
+
+type PromptVersion struct {
+	Name    string
+	Version PromptVersion
+	Content string
+	CreatedAt time.Time
+}
+
+type Artifact struct {
+	ID         ArtifactID
+	SessionID  SessionID
+	TenantID   TenantID
+	S3Key      string
+	Type       string
+	CreatedAt  time.Time
+}
+
+type AuditLog struct {
+	ID                string
+	ToolName          ToolName
+	IdempotencyKey    string
+	RequestHash       string
+	ResponseHash      string
+	ApprovalRecord    *string
+	CreatedAt         time.Time
+}
+
+type RiverJob struct {
+	ID              JobID
+	TenantID        TenantID
+	SessionID       SessionID
+	IdempotencyKey  string
+	Payload         map[string]interface{}
+	Attempt         int
+	Status          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type Tool struct {
+	Name        ToolName
+	Permission  ToolPermission
+	Description string
+	Schema      map[string]interface{}
+	CacheTTL    *time.Duration
+}
+
+type ModelRouter interface {
+	Route(ctx context.Context, prompt string, tier OrchestrationTier) (string, error)
+}
+
+type PromptRegistry interface {
+	GetPrompt(ctx context.Context, name string, version PromptVersion) (string, error)
+}
+
+type RAGService interface {
+	Retrieve(ctx context.Context, tenantID TenantID, query string, topK int) ([]*Chunk, error)
+	ReRank(ctx context.Context, chunks []*Chunk, query string) ([]*Chunk, error)
+	GenerateCitations(ctx context.Context, chunks []*Chunk, answer string) ([]string, error)
+}
+
+type ToolRegistry interface {
+	Register(tool Tool) error
+	Get(name ToolName) (*Tool, error)
+	Execute(ctx context.Context, tool ToolName, args map[string]interface{}) (map[string]interface{}, error)
+}
+
+type FSMService interface {
+	GetSession(ctx context.Context, sessionID SessionID) (*Session, error)
+	UpdateSession(ctx context.Context, session *Session) error
+	TransitionToWaitingForHuman(ctx context.Context, sessionID SessionID, reason string) error
+	TransitionToCompleted(ctx context.Context, sessionID SessionID) error
+	TransitionToExpired(ctx context.Context, sessionID SessionID) error
+}
+
+type GuardrailService interface {
+	EvaluateAnswer(ctx context.Context, chunks []*Chunk, answer string) (bool, []string, error)
+	LogEvaluation(ctx context.Context, sessionID SessionID, metrics map[string]interface{}) error
+}
+
+type ChannelAdapter interface {
+	HandleMessage(ctx context.Context, tenantID TenantID, channelID string, message string) error
+	SendResponse(ctx context.Context, tenantID TenantID, channelID string, response string) error
+}
+
+type APIService interface {
+	CreateSession(ctx context.Context, tenantID TenantID, userID UserID, channel ChannelType) (*Session, error)
+	GetOrCreateSession(ctx context.Context, tenantID TenantID, userID UserID, channel ChannelType) (*Session, error)
+	ProcessMessage(ctx context.Context, sessionID SessionID, message string) error
+	GetMessages(ctx context.Context, sessionID SessionID) ([]*Message, error)
+}
+
+type WorkerService interface {
+	ProcessJob(ctx context.Context, job *river.Job[any]) error
+	QueueJob(ctx context.Context, tenantID TenantID, sessionID SessionID, payload map[string]interface{}) error
+}
+
+type Config struct {
+	DatabaseURL      string
+	RedisURL         string
+	ObjectStorageURL string
+	EmbeddingModel   EmbeddingModel
+	MaxConcurrency   int
+	RateLimit        int
+}
+
+func NewAPIServer(cfg *Config) (*APIService, error) { return nil, nil }
+func NewWorker(cfg *Config, dbPool *pgxpool.Pool) (*WorkerService, error) { return nil, nil }
+func NewModelRouter() ModelRouter { return nil }
+func NewPromptRegistry(dbPool *pgxpool.Pool) PromptRegistry { return nil }
+func NewRAGService(dbPool *pgxpool.Pool) RAGService { return nil }
+func NewToolRegistry() ToolRegistry { return nil }
+func NewFSMService(dbPool *pgxpool.Pool) FSMService { return nil }
+func NewGuardrailService() GuardrailService { return nil }
+func NewTelegramAdapter() ChannelAdapter { return nil }
+func NewWebWidgetAdapter() ChannelAdapter { return nil }
+
+func (s *Session) IsExpired() bool { return false }
+func (s *Session) CanAcceptMessage() bool { return s.State == StateActive }
+
+func (m *Message) GetCitations() []string { return nil }
+func (m *Message) SetCitations(citations []string) {}
+
+func (t *Tool) HasPermission(permission ToolPermission) bool { return false }
+func (t *Tool) GetSchema() map[string]interface{} { return nil }
+
+func (r *RiverJob) IsFailed() bool { return r.Attempt > 3 }
+func (r *RiverJob) ShouldRetry() bool { return !r.IsFailed() }
+
+func (c *Chunk) GetContent() string { return "" }
+func (c *Chunk) GetMetadata() map[string]interface{} { return nil }
+
+func (d *Document) IsIndexed() bool { return d.IngestionStatus == "indexed" }
+func (d *Document) IsStale() bool { return d.IngestionStatus == "stale" }
+
+func (p *PromptVersion) GetContent() string { return "" }
+
+func (a *Artifact) GetS3Key() string { return "" }
+func (a *Artifact) GetType() string { return "" }
+
+func (r *RAGService) Search(ctx context.Context, tenantID TenantID, query string, topK int) ([]*Chunk, error) { return nil, nil }
+func (r *RAGService) HybridSearch(ctx context.Context, tenantID TenantID, query string, topK int) ([]*Chunk, error) { return nil, nil }
+
+func (t *ToolRegistry) ListTools(ctx context.Context) []ToolName { return nil }
+func (t *ToolRegistry) ValidateArgs(ctx context.Context, toolName ToolName, args map[string]interface{}) error { return nil }
+
+func (f *FSMService) StartSession(ctx context.Context, tenantID TenantID, userID UserID, channel ChannelType) (*Session, error) { return nil, nil }
+func (f *FSMService) EndSession(ctx context.Context, sessionID SessionID) error { return nil }
+
+func (g *GuardrailService) CheckCitationCoverage(ctx context.Context, chunks []*Chunk, answer string) (float64, error) { return 0, nil }
+func (g *GuardrailService) CheckRetrievalRecall(ctx context.Context, chunks []*Chunk, query string) (float64, error) { return 0, nil }
+
+func (a *APIService) HandleWebhook(ctx context.Context, tenantID TenantID, payload map[string]interface{}) error { return nil }
+func (a *APIService) HandleWebSocket(ctx context.Context, sessionID SessionID, message string) error { return nil }
+
+func (w *WorkerService) Start(ctx context.Context) error { return nil }
+func (w *WorkerService) Stop(ctx context.Context) error { return nil }
+func (w *WorkerService) GetQueueDepth(ctx context.Context) (int, error) { return 0, nil }
+
+func (m *ModelRouter) SelectModel(ctx context.Context, prompt string, tier OrchestrationTier) (string, error) { return "", nil }
+
+func (p *PromptRegistry) LoadPrompt(ctx context.Context, name string, version PromptVersion) (string, error) { return "", nil }
+
+func (r *RAGService) RetrieveWithCitations(ctx context.Context, tenantID TenantID, query string, topK int) ([]*Chunk, []string, error) { return nil, nil, nil }
+
+func (t *ToolRegistry) ExecuteRead(ctx context.Context, toolName ToolName, args map[string]interface{}) (map[string]interface{}, error) { return nil, nil }
+func (t *ToolRegistry) ExecuteWrite(ctx context.Context, toolName ToolName, args map[string]interface{}) (map[string]interface{}, error) { return nil, nil }
+
+func (f *FSMService) CheckTimeout(ctx context.Context, sessionID SessionID) error { return nil }
+
+func (g *GuardrailService) LogMetrics(ctx context.Context, sessionID SessionID, metrics map[string]interface{}) error { return nil }
+
+func (c *ChannelAdapter) SendMessage(ctx context.Context, tenantID TenantID, channelID string, message string, traceID trace.TraceID) error { return nil }
+
+func init() {}

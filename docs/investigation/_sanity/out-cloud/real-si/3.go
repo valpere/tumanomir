@@ -1,0 +1,200 @@
+package indexer
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"io"
+	"os"
+	"time"
+)
+
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+)
+
+type Chunk struct {
+	ID        int64
+	SessionID string
+	Turn      int64
+	Role      Role
+	Timestamp time.Time
+	Content   string
+}
+
+type RawRecord struct {
+	Type      string          `json:"type"`
+	IsMeta    bool            `json:"isMeta"`
+	Timestamp *time.Time        `json:"timestamp"`
+	Message   json.RawMessage `json:"message"`
+	SessionID string          `json:"sessionId"`
+	Role      string          `json:"role"`
+	Content   string          `json:"content"`
+}
+
+type MineConfig struct {
+	DBPath      string
+	JSONLPath   string
+	Deadline    time.Duration
+	OllamaURL   string
+	OllamaModel string
+}
+
+type MineResult struct {
+	SessionID        string
+	ChunksStored     int
+	ChunksEmbedded   int
+	ChunksDeferred   int
+	ChunksSkipped    int
+	Elapsed          time.Duration
+}
+
+type SearchConfig struct {
+	DBPath      string
+	Query       string
+	Limit       int
+	JSONOutput  bool
+	OllamaURL   string
+	OllamaModel string
+}
+
+type SearchResult struct {
+	SessionID string    `json:"session_id"`
+	Date      time.Time `json:"date"`
+	Role      Role      `json:"role"`
+	Snippet   string    `json:"snippet"`
+	Score     float64   `json:"score"`
+	Source    string    `json:"source"`
+}
+
+type StatsResult struct {
+	Sessions          int
+	Chunks            int
+	PendingEmbeddings int
+	DBSizeBytes       int64
+	SchemaVersion     int
+}
+
+type EmbedResult struct {
+	Processed int
+	Skipped   int
+	Elapsed   time.Duration
+}
+
+type Store struct {
+	db            *sql.DB
+	schemaVersion int
+}
+
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+	Dimensions() int
+}
+
+type OllamaEmbedder struct {
+	BaseURL string
+	Model   string
+}
+
+type FTS5Fallback struct {
+	db *sql.DB
+}
+
+func NewStore(dbPath string) (*Store, error) {
+	return nil, nil
+}
+
+func (s *Store) Close() error {
+	return nil
+}
+
+func (s *Store) InitSchema() error {
+	return nil
+}
+
+func (s *Store) InsertChunk(chunk Chunk) (int64, error) {
+	return 0, nil
+}
+
+func (s *Store) InsertEmbedding(chunkID int64, vector []float32) error {
+	return nil
+}
+
+func (s *Store) GetPendingEmbeddings(limit int) ([]Chunk, error) {
+	return nil, nil
+}
+
+func (s *Store) SearchByEmbedding(ctx context.Context, queryVector []float32, limit int) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func (s *Store) SearchByFTS5(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func (s *Store) Stats() (StatsResult, error) {
+	return StatsResult{}, nil
+}
+
+func (s *Store) hasEmbeddings() (bool, error) {
+	return false, nil
+}
+
+func Mine(ctx context.Context, cfg MineConfig) (MineResult, error) {
+	return MineResult{}, nil
+}
+
+func Search(ctx context.Context, cfg SearchConfig) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func Embed(ctx context.Context, dbPath string) (EmbedResult, error) {
+	return EmbedResult{}, nil
+}
+
+func Stats(dbPath string) (StatsResult, error) {
+	return StatsResult{}, nil
+}
+
+func ParseJSONL(r io.Reader, sessionID string) ([]Chunk, error) {
+	return nil, nil
+}
+
+func NormalizeContent(content string) string {
+	return ""
+}
+
+func ExtractSessionIDFromPath(path string) string {
+	return ""
+}
+
+func NewOllamaEmbedder(baseURL, model string) *OllamaEmbedder {
+	return nil
+}
+
+func (e *OllamaEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, nil
+}
+
+func (e *OllamaEmbedder) Dimensions() int {
+	return 0
+}
+
+func cosineSimilarity(a, b []float32) float64 {
+	return 0
+}
+
+func truncateSnippet(text string, maxLen int) string {
+	return ""
+}
+
+func FindProjectRoot(path string) (string, error) {
+	return "", nil
+}
+
+func RunCLI(args []string, stdout, stderr io.Writer) int {
+	return 0
+}

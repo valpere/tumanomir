@@ -1,0 +1,187 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
+)
+
+type TenantID string
+type SessionID string
+type DocumentID string
+type ArtifactID string
+type ToolName string
+type PromptName string
+type ModelProvider string
+type ToolPermission string
+
+const (
+	ReadPermission   ToolPermission = "read"
+	DraftPermission  ToolPermission = "draft"
+	WritePermission  ToolPermission = "write"
+)
+
+type FSMState string
+
+const (
+	ActiveState         FSMState = "active"
+	WaitingForHumanState FSMState = "waiting_for_human"
+	CompletedState      FSMState = "completed"
+	ExpiredState        FSMState = "expired"
+)
+
+type Tool interface {
+	Name() ToolName
+	Permission() ToolPermission
+	Execute(ctx context.Context, args map[string]interface{}) (interface{}, error)
+}
+
+type ModelRouter interface {
+	Route(ctx context.Context, task string) (string, error)
+}
+
+type PromptRegistry interface {
+	GetPrompt(ctx context.Context, name PromptName, version string) (string, error)
+}
+
+type VectorSearchResult struct {
+	DocumentID DocumentID
+	ChunkID    string
+	Score      float64
+	Content    string
+	Metadata   map[string]interface{}
+}
+
+type RAGResponse struct {
+	Context     []VectorSearchResult
+	Answer      string
+	Citations   []string
+	TokenCost   float64
+	ExecutionTime time.Duration
+}
+
+type Session struct {
+	ID          SessionID
+	TenantID    TenantID
+	State       FSMState
+	Version     int
+	ExpiresAt   time.Time
+	History     []Message
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type Message struct {
+	Role      string
+	Content   string
+	Timestamp time.Time
+}
+
+type JobStatus string
+
+const (
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusCompleted JobStatus = "completed"
+	JobStatusFailed    JobStatus = "failed"
+)
+
+type Artifact struct {
+	ID          ArtifactID
+	DocumentID  DocumentID
+	URL         string
+	CreatedAt   time.Time
+	ContentType string
+}
+
+type AuditLog struct {
+	ID            string
+	TenantID      TenantID
+	IdempotencyKey string
+	ToolName      ToolName
+	RequestHash   string
+	ResponseHash  string
+	CreatedAt     time.Time
+}
+
+type ChannelAdapter interface {
+	HandleMessage(ctx context.Context, tenantID TenantID, message Message) error
+	GetWebhookURL() string
+}
+
+type TelegramAdapter struct{}
+
+type WebWidgetAdapter struct{}
+
+type APIError struct {
+	Code    string
+	Message string
+	Details map[string]interface{}
+}
+
+func (e *APIError) Error() string { return e.Message }
+
+type Config struct {
+	DatabaseURL         string
+	RedisURL            string
+	ObjectStorageURL    string
+	MaxConcurrency      int
+	SessionTimeout      time.Duration
+	RateLimitThreshold  int
+	ModelRouter         ModelRouter
+	PromptRegistry      PromptRegistry
+	ToolRegistry        map[ToolName]Tool
+	ChannelAdapters     []ChannelAdapter
+}
+
+type Service struct {
+	config          *Config
+	db              *pgxpool.Pool
+	riverClient     *river.Client
+	tracer          trace.Tracer
+	metrics         Metrics
+	rateLimiter     RateLimiter
+	toolRegistry    map[ToolName]Tool
+	modelRouter     ModelRouter
+	promptRegistry  PromptRegistry
+	channelAdapters []ChannelAdapter
+}
+
+type Metrics interface {
+	RecordTokenUsage(tenantID TenantID, prompt, completion int, model string)
+	RecordRetrievalLatency(latency time.Duration)
+	RecordQueueDepth(depth int)
+	RecordErrorRate()
+	RecordCost(tenantID TenantID, cost float64)
+}
+
+type RateLimiter interface {
+	Allow(ctx context.Context, tenantID TenantID) (bool, error)
+}
+
+func NewService(config *Config) (*Service, error) { return &Service{}, nil }
+
+func (s *Service) Start(ctx context.Context) error { return nil }
+
+func (s *Service) ProcessRAGRequest(ctx context.Context, tenantID TenantID, message Message) (*RAGResponse, error) { return &RAGResponse{}, nil }
+
+func (s *Service) CreateSession(ctx context.Context, tenantID TenantID, initialMessage Message) (*Session, error) { return &Session{}, nil }
+
+func (s *Service) UpdateSession(ctx context.Context, sessionID SessionID, message Message) (*Session, error) { return &Session{}, nil }
+
+func (s *Service) ExecuteTool(ctx context.Context, toolName ToolName, args map[string]interface{}) (interface{}, error) { return nil, nil }
+
+func (s *Service) GenerateArtifact(ctx context.Context, sessionID SessionID, content string) (*Artifact, error) { return &Artifact{}, nil }
+
+func (s *Service) StoreArtifact(ctx context.Context, artifact *Artifact) error { return nil }
+
+func (s *Service) GetAuditLog(ctx context.Context, tenantID TenantID, idempotencyKey string) (*AuditLog, error) { return &AuditLog{}, nil }
+
+func (s *Service) HandleWebhook(ctx context.Context, tenantID TenantID, payload []byte) error { return nil }
+
+func (s *Service) ProcessBackgroundJob(ctx context.Context, job *river.Job) error { return nil }
+
+func (s *Service) Close() error { return nil }

@@ -1,0 +1,204 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+const (
+	CurrentSchemaVersion int64 = 1
+	DefaultSearchLimit   int   = 5
+	MaxSnippetLen        int   = 200
+	EmbeddingDim         int   = 1024
+	OllamaModel          string = "bge-m3:latest"
+	MineTimeout          time.Duration = 50 * time.Second
+)
+
+type JSONLRecord struct {
+	Type      string `json:"type"`
+	SessionID string `json:"sessionId"`
+	Role      string `json:"role"`
+	IsMeta    bool   `json:"isMeta"`
+	Content   string `json:"content"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type Chunk struct {
+	SessionID   string
+	ChunkIndex  int
+	Role        string
+	Content     string
+	Cleaned     string
+	OccuredAt   time.Time
+}
+
+type MineResult struct {
+	SessionID        string
+	ChunksInserted   int
+	ChunksDeferred   int
+	ChunksSkipped    int
+	EmbeddingsDone   int
+	Elapsed          time.Duration
+}
+
+type SearchResult struct {
+	SessionID string    `json:"session_id"`
+	Role      string    `json:"role"`
+	Snippet   string    `json:"snippet"`
+	Score     float64   `json:"score"`
+	Date      time.Time `json:"date"`
+}
+
+type Stats struct {
+	Sessions          int64
+	Chunks            int64
+	PendingEmbeddings int64
+	Embeddings        int64
+	DBSizeBytes       int64
+	SchemaVersion     int64
+}
+
+type Store struct {
+	db *sql.DB
+}
+
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+	Available(ctx context.Context) bool
+}
+
+type OllamaEmbedder struct {
+	baseURL string
+	model   string
+	dim     int
+}
+
+type NoopEmbedder struct{}
+
+func main() {
+	os.Exit(run(os.Args, os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return 0
+}
+
+func openStore(dbPath string) (*Store, error) {
+	return nil, nil
+}
+
+func (s *Store) initSchema(expectedVersion int64) error {
+	return nil
+}
+
+func (s *Store) Close() error {
+	return nil
+}
+
+func (s *Store) InsertSession(sessionID string) error {
+	return nil
+}
+
+func (s *Store) InsertChunk(sessionID string, chunk Chunk) (int64, error) {
+	return 0, nil
+}
+
+func (s *Store) SaveEmbedding(chunkID int64, embedding []float32) error {
+	return nil
+}
+
+func (s *Store) GetPendingEmbeddings(limit int) ([]struct {
+	ID      int64
+	Content string
+}, error) {
+	return nil, nil
+}
+
+func (s *Store) SearchEmbedding(query []float32, limit int) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func (s *Store) SearchFTS5(query string, limit int) ([]SearchResult, error) {
+	return nil, nil
+}
+
+func (s *Store) Stats() (Stats, error) {
+	return Stats{}, nil
+}
+
+func (s *Store) HasAnyEmbeddings() (bool, error) {
+	return false, nil
+}
+
+type Miner struct {
+	store    *Store
+	embedder Embedder
+}
+
+func NewMiner(store *Store, embedder Embedder) *Miner {
+	return nil
+}
+
+func (m *Miner) Mine(ctx context.Context, jsonlPath string) (MineResult, error) {
+	return MineResult{}, nil
+}
+
+func parseJSONL(path string) ([]JSONLRecord, error) {
+	return nil, nil
+}
+
+func extractChunks(records []JSONLRecord) []Chunk {
+	return nil
+}
+
+func cleanContent(content string) string {
+	return ""
+}
+
+func isValidMessage(r JSONLRecord) bool {
+	return false
+}
+
+func projectRoot() (string, error) {
+	return "", nil
+}
+
+func defaultDBPath(projectRoot string) string {
+	return ""
+}
+
+func cosineSimilarity(a, b []float32) float64 {
+	return 0
+}
+
+func truncateAtWordBoundary(s string, maxLen int) string {
+	return ""
+}
+
+func NewOllamaEmbedder(baseURL, model string, dim int) *OllamaEmbedder {
+	return nil
+}
+
+func (e *OllamaEmbedder) Available(ctx context.Context) bool {
+	return false
+}
+
+func (e *OllamaEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, nil
+}
+
+func (e *NoopEmbedder) Available(ctx context.Context) bool {
+	return false
+}
+
+func (e *NoopEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, nil
+}
+
+var ErrSchemaMismatch = errors.New("schema version mismatch")

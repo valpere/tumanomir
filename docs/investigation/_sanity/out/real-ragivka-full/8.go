@@ -1,0 +1,328 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+)
+
+// Tenant represents a customer tenant with isolated data
+type Tenant struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	IsolationID string    `json:"isolation_id"`
+}
+
+// User represents an end-user in a tenant
+type User struct {
+	ID            string    `json:"id"`
+	TenantID      string    `json:"tenant_id"`
+	ChannelType   string    `json:"channel_type"` // telegram, web
+	ChannelID     string    `json:"channel_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// SessionState represents the FSM state of a conversation
+type SessionState string
+
+const (
+	SessionActive        SessionState = "active"
+	SessionWaitingForHuman SessionState = "waiting_for_human"
+	SessionCompleted     SessionState = "completed"
+	SessionExpired       SessionState = "expired"
+)
+
+// Session represents a conversation with a user
+type Session struct {
+	ID               string      `json:"id"`
+	TenantID         string      `json:"tenant_id"`
+	UserID           string      `json:"user_id"`
+	State            SessionState `json:"state"`
+	Version          int         `json:"version"`
+	OrchestrationTier int         `json:"orchestration_tier"` // 0-3
+	Channel          string      `json:"channel"`
+	ExpiresAt        time.Time   `json:"expires_at"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+}
+
+// Message represents a turn in a conversation
+type Message struct {
+	ID            string    `json:"id"`
+	SessionID     string    `json:"session_id"`
+	Role          string    `json:"role"` // user, assistant, system
+	Content       string    `json:"content"`
+	CitationRefs  []string  `json:"citation_refs"`
+	TokenCount    int       `json:"token_count"`
+	JobID         *string   `json:"job_id"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// RiverJob represents an asynchronous job in the queue
+type RiverJob struct {
+	ID                string    `json:"id"`
+	TenantID          string    `json:"tenant_id"`
+	SessionID         string    `json:"session_id"`
+	IdempotencyKey    string    `json:"idempotency_key"`
+	Payload           []byte    `json:"payload"`
+	Attempt           int       `json:"attempt"`
+	MaxAttempts       int       `json:"max_attempts"`
+	State             string    `json:"state"` // scheduled, running, completed, failed
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	StartedAt         *time.Time `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at"`
+}
+
+// AuditLog records write tool executions and state transitions
+type AuditLog struct {
+	ID               string    `json:"id"`
+	TenantID         string    `json:"tenant_id"`
+	SessionID        string    `json:"session_id"`
+	UserID           *string   `json:"user_id"`
+	ToolName         string    `json:"tool_name"`
+	IdempotencyKey   string    `json:"idempotency_key"`
+	RequestHash      string    `json:"request_hash"`
+	ResponseHash     string    `json:"response_hash"`
+	ApprovalRecord   *string   `json:"approval_record"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// Document represents an uploaded file in the knowledge base
+type Document struct {
+	ID                 string    `json:"id"`
+	TenantID           string    `json:"tenant_id"`
+	S3Key              string    `json:"s3_key"`
+	Version            string    `json:"version"`
+	IngestionStatus    string    `json:"ingestion_status"` // pending, indexed, stale
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// Chunk represents a segment of text from a document
+type Chunk struct {
+	ID           string    `json:"id"`
+	DocumentID   string    `json:"document_id"`
+	Ordinal      int       `json:"ordinal"`
+	Content      string    `json:"content"`
+	Vector       []float32 `json:"vector"`
+	TsVector     string    `json:"ts_vector"`
+	Metadata     map[string]interface{} `json:"metadata"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// PromptVersion represents a version-controlled system prompt
+type PromptVersion struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Version   string    `json:"version"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Artifact represents a generated output file
+type Artifact struct {
+	ID         string    `json:"id"`
+	SessionID  string    `json:"session_id"`
+	S3Key      string    `json:"s3_key"`
+	Type       string    `json:"type"` // pdf, excel
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ModelProvider represents an LLM provider
+type ModelProvider string
+
+const (
+	OpenAIProvider    ModelProvider = "openai"
+	AnthropicProvider ModelProvider = "anthropic"
+	GeminiProvider    ModelProvider = "gemini"
+	OpenRouterProvider ModelProvider = "openrouter"
+	OllamaProvider    ModelProvider = "ollama"
+)
+
+// ToolPermission represents the permission level for a tool
+type ToolPermission string
+
+const (
+	ReadTool   ToolPermission = "read"
+	DraftTool  ToolPermission = "draft"
+	WriteTool  ToolPermission = "write"
+)
+
+// Tool represents a registered function that can be called by the AI
+type Tool struct {
+	Name        string             `json:"name"`
+	Provider    ModelProvider      `json:"provider"`
+	Permission  ToolPermission     `json:"permission"`
+	Description string             `json:"description"`
+	Schema      map[string]interface{} `json:"schema"`
+	CacheTTL    *time.Duration     `json:"cache_ttl"`
+}
+
+// ToolRegistry manages registered tools
+type ToolRegistry interface {
+	RegisterTool(ctx context.Context, tool Tool) error
+	GetTool(ctx context.Context, name string) (*Tool, error)
+	ListTools(ctx context.Context, permission ToolPermission) ([]*Tool, error)
+}
+
+// FSMStateTransition represents a state change in the conversation
+type FSMStateTransition struct {
+	SessionID    string      `json:"session_id"`
+	FromState    SessionState `json:"from_state"`
+	ToState      SessionState `json:"to_state"`
+	Reason       string      `json:"reason"`
+	CreatedAt    time.Time   `json:"created_at"`
+}
+
+// ModelRouter routes requests to appropriate LLM providers
+type ModelRouter interface {
+	GetModel(ctx context.Context, taskType string) (string, error)
+	IsProviderAvailable(ctx context.Context, provider ModelProvider) bool
+}
+
+// PromptRegistry manages system prompts
+type PromptRegistry interface {
+	GetPrompt(ctx context.Context, name, version string) (string, error)
+	ListVersions(ctx context.Context, name string) ([]*PromptVersion, error)
+}
+
+// RAGPipeline handles document ingestion and retrieval
+type RAGPipeline interface {
+	IngestDocument(ctx context.Context, tenantID string, document Document) error
+	Retrieve(ctx context.Context, tenantID string, query string, topK int) ([]*Chunk, error)
+	ReRank(ctx context.Context, chunks []*Chunk, query string) ([]*Chunk, error)
+}
+
+// ChannelAdapter handles communication with users
+type ChannelAdapter interface {
+	SendMessage(ctx context.Context, sessionID string, message string) error
+	ReceiveMessage(ctx context.Context, tenantID string) (*Message, error)
+}
+
+// SessionManager manages conversation sessions and state
+type SessionManager interface {
+	CreateSession(ctx context.Context, tenantID string, userID string) (*Session, error)
+	GetSession(ctx context.Context, sessionID string) (*Session, error)
+	UpdateSession(ctx context.Context, session *Session) error
+	TransitionState(ctx context.Context, sessionID string, toState SessionState, reason string) error
+	ExpireInactiveSessions(ctx context.Context, tenantID string, timeout time.Duration) error
+}
+
+// JobQueue manages asynchronous jobs using River
+type JobQueue interface {
+	SubmitJob(ctx context.Context, job *river.Job) error
+	GetJobStatus(ctx context.Context, jobID string) (*river.Job, error)
+	RetryJob(ctx context.Context, jobID string) error
+}
+
+// ToolExecutor executes registered tools
+type ToolExecutor interface {
+	ExecuteTool(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+}
+
+// Config holds framework configuration
+type Config struct {
+	Server   ServerConfig   `json:"server"`
+	Database DatabaseConfig `json:"database"`
+	Redis    RedisConfig    `json:"redis"`
+}
+
+type ServerConfig struct {
+	Port       int           `json:"port"`
+	Timeout    time.Duration `json:"timeout"`
+	Workers    int           `json:"workers"`
+}
+
+type DatabaseConfig struct {
+	URL     string        `json:"url"`
+	PoolMax int           `json:"pool_max"`
+	PoolMin int           `json:"pool_min"`
+	Timeout time.Duration `json:"timeout"`
+}
+
+type RedisConfig struct {
+	URL       string        `json:"url"`
+	Timeout   time.Duration `json:"timeout"`
+	PoolSize  int           `json:"pool_size"`
+}
+
+// Framework represents the main Ragivka framework
+type Framework struct {
+	config          *Config
+	db              *pgxpool.Pool
+	redisClient     interface{}
+	sessionManager  SessionManager
+	jobQueue        JobQueue
+	modelRouter     ModelRouter
+	promptRegistry  PromptRegistry
+	ragPipeline     RAGPipeline
+	channelAdapter  ChannelAdapter
+	toolRegistry    ToolRegistry
+	toolExecutor    ToolExecutor
+}
+
+// NewFramework creates a new Ragivka framework instance
+func NewFramework(config *Config) (*Framework, error) {
+	return &Framework{}, nil
+}
+
+// Start initializes and starts the framework
+func (f *Framework) Start(ctx context.Context) error {
+	return nil
+}
+
+// Stop shuts down the framework
+func (f *Framework) Stop(ctx context.Context) error {
+	return nil
+}
+
+// GetSession returns a session by ID
+func (f *Framework) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+	return &Session{}, nil
+}
+
+// CreateSession creates a new conversation session
+func (f *Framework) CreateSession(ctx context.Context, tenantID string, userID string) (*Session, error) {
+	return &Session{}, nil
+}
+
+// ProcessMessage handles incoming user messages
+func (f *Framework) ProcessMessage(ctx context.Context, sessionID string, message *Message) error {
+	return nil
+}
+
+// ExecuteTool executes a registered tool with given arguments
+func (f *Framework) ExecuteTool(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error) {
+	return nil, nil
+}
+
+// IngestDocument handles document ingestion into the knowledge base
+func (f *Framework) IngestDocument(ctx context.Context, tenantID string, document Document) error {
+	return nil
+}
+
+// RetrieveContext performs retrieval for a query
+func (f *Framework) RetrieveContext(ctx context.Context, tenantID string, query string, topK int) ([]*Chunk, error) {
+	return []*Chunk{}, nil
+}
+
+// GenerateAnswer generates an AI response based on context and prompt
+func (f *Framework) GenerateAnswer(ctx context.Context, sessionID string, prompt string, contextChunks []*Chunk) (string, error) {
+	return "", nil
+}
+
+// SubmitJob submits a job to the background queue
+func (f *Framework) SubmitJob(ctx context.Context, job *RiverJob) error {
+	return nil
+}
+
+// RegisterTool registers a new tool in the system
+func (f *Framework) RegisterTool(ctx context.Context, tool Tool) error {
+	return nil
+}

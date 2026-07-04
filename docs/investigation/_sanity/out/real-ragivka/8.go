@@ -1,0 +1,204 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
+)
+
+type TenantID string
+type SessionID string
+type DocumentID string
+type ArtifactID string
+type ToolName string
+type ModelProvider string
+type State string
+
+const (
+	StateActive        State = "active"
+	StateWaitingForHuman State = "waiting_for_human"
+	StateCompleted     State = "completed"
+	StateExpired       State = "expired"
+)
+
+type FSMTransition struct {
+	SessionID SessionID
+	From      State
+	To        State
+	Timestamp time.Time
+}
+
+type AuditLog struct {
+	IDempotencyKey string
+	ToolName       ToolName
+	RequestHash    string
+	ResponseHash   string
+	Timestamp      time.Time
+}
+
+type JobStatus string
+
+const (
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusCompleted JobStatus = "completed"
+	JobStatusFailed    JobStatus = "failed"
+)
+
+type Job struct {
+	ID        string
+	Type      string
+	Payload   []byte
+	Status    JobStatus
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type ToolPermission string
+
+const (
+	ToolRead   ToolPermission = "read"
+	ToolDraft  ToolPermission = "draft"
+	ToolWrite  ToolPermission = "write"
+)
+
+type Tool struct {
+	Name        ToolName
+	Permissions []ToolPermission
+	Handler     func(context.Context, any) (any, error)
+	CacheTTL    time.Duration
+}
+
+type PromptVersion struct {
+	Name    string
+	Version string
+	Content string
+}
+
+type ModelRoute struct {
+	Provider   ModelProvider
+	Model      string
+	CostPolicy string
+}
+
+type RAGResult struct {
+	Chunks     []string
+	Citations  []Citation
+	Relevance  float64
+}
+
+type Citation struct {
+	DocumentID DocumentID
+	Ordinal    int
+	Text       string
+}
+
+type StructuredOutput struct {
+	JSONSchema string
+	Parser     func([]byte) (any, error)
+}
+
+type ChannelAdapter interface {
+	HandleMessage(context.Context, any) error
+	SendResponse(context.Context, any) error
+}
+
+type TelegramAdapter struct{}
+
+func (t *TelegramAdapter) HandleMessage(ctx context.Context, msg any) error { return nil }
+func (t *TelegramAdapter) SendResponse(ctx context.Context, resp any) error  { return nil }
+
+type WebWidgetAdapter struct{}
+
+func (w *WebWidgetAdapter) HandleMessage(ctx context.Context, msg any) error { return nil }
+func (w *WebWidgetAdapter) SendResponse(ctx context.Context, resp any) error  { return nil }
+
+type SessionManager interface {
+	GetSession(ctx context.Context, sessionID SessionID) (*Session, error)
+	UpdateSession(ctx context.Context, session *Session) error
+	TransitionState(ctx context.Context, sessionID SessionID, to State) error
+}
+
+type Session struct {
+	ID           SessionID
+	TenantID     TenantID
+	State        State
+	Version      int64
+	LastActive   time.Time
+	ContextLimit int
+}
+
+type KnowledgeBase interface {
+	IngestDocument(ctx context.Context, tenantID TenantID, doc any) error
+	Retrieve(ctx context.Context, tenantID TenantID, query string) ([]RAGResult, error)
+	ChunkDocument(ctx context.Context, doc any) ([]string, error)
+}
+
+type ToolRegistry interface {
+	RegisterTool(ctx context.Context, tool Tool) error
+	GetTool(ctx context.Context, name ToolName) (*Tool, error)
+	InvokeTool(ctx context.Context, toolName ToolName, args any) (any, error)
+}
+
+type ModelRouter interface {
+	Route(ctx context.Context, task string) (*ModelRoute, error)
+}
+
+type APIService interface {
+	HandleRequest(ctx context.Context, req any) (any, error)
+	Authenticate(ctx context.Context, token string) (TenantID, error)
+}
+
+type MetricsCollector interface {
+	RecordLLMTokenUsage(ctx context.Context, tenantID TenantID, prompt, completion int)
+	RecordRetrievalLatency(ctx context.Context, tenantID TenantID, duration time.Duration)
+	RecordErrorRate(ctx context.Context, tenantID TenantID, err error)
+}
+
+type Tracer interface {
+	StartSpan(ctx context.Context, name string) (trace.Span, context.Context)
+	EndSpan(span trace.Span)
+}
+
+type RateLimiter interface {
+	Allow(ctx context.Context, tenantID TenantID) (bool, error)
+}
+
+type BackupManager interface {
+	CreateBackup(ctx context.Context) error
+	RestoreFromBackup(ctx context.Context, backupID string) error
+}
+
+type DisasterRecoveryManager interface {
+	PrepareForDisaster(ctx context.Context) error
+	RestoreFromDisaster(ctx context.Context) error
+}
+
+type VectorStore interface {
+	Search(ctx context.Context, tenantID TenantID, query []float32, k int) ([]string, error)
+	AddEmbeddings(ctx context.Context, tenantID TenantID, embeddings map[string][]float32) error
+}
+
+type ArtifactGenerator interface {
+	GeneratePDF(ctx context.Context, data any) (*ArtifactID, error)
+	GenerateExcel(ctx context.Context, data any) (*ArtifactID, error)
+}
+
+type ObjectStorage interface {
+	Put(ctx context.Context, tenantID TenantID, key string, data []byte) error
+	Get(ctx context.Context, tenantID TenantID, key string) ([]byte, error)
+	Delete(ctx context.Context, tenantID TenantID, key string) error
+}
+
+type RiverQueue interface {
+	Submit(ctx context.Context, job any) error
+	SubmitWithOpts(ctx context.Context, job any, opts *river.SubmitOpts) error
+	Watch(ctx context.Context, consumer river.Consumer) error
+}
+
+type PostgresPool struct {
+	*pgxpool.Pool
+}

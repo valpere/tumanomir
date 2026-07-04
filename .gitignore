@@ -36,6 +36,7 @@ go.work.sum
 # itself; keep this anchored and scoped to bin/ only).
 /bin/
 *.test
+tmp/
 
 # Session recall — per-project, local-only context log
 .claude/session-log.md
@@ -49,3 +50,11 @@ go.work.sum
 # self-learn raw pattern data — solo project, kept local
 _patterns/mistakes.jsonl
 _patterns/wins.jsonl
+
+# ~/.gitignore_global has a blanket "_*" rule (for __pycache__ etc.) that
+# would otherwise also swallow docs/investigation/_sanity/ — that directory
+# is deliberately _-prefixed so `go build`/`go vet` skip its generated
+# sample .go files, not to hide it from git. Un-ignore it explicitly so
+# contributors and CI don't need `git add -f`.
+!docs/investigation/_sanity/
+!docs/investigation/_sanity/**

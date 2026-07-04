@@ -1,0 +1,67 @@
+package payment
+
+import (
+	"time"
+)
+
+type PaymentProvider string
+
+const (
+	ProviderStripe  PaymentProvider = "stripe"
+	ProviderPayPal  PaymentProvider = "paypal"
+	ProviderBank    PaymentProvider = "bank"
+)
+
+type TransactionStatus string
+
+const (
+	StatusPending   TransactionStatus = "pending"
+	StatusSuccess   TransactionStatus = "success"
+	StatusFailed    TransactionStatus = "failed"
+)
+
+type Transaction struct {
+	ID          string            `json:"id"`
+	Amount      float64           `json:"amount"`
+	Currency    string            `json:"currency"`
+	Provider    PaymentProvider   `json:"provider"`
+	Status      TransactionStatus `json:"status"`
+	Error       *string           `json:"error,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+type PaymentRequest struct {
+	Amount   float64         `json:"amount"`
+	Currency string          `json:"currency"`
+	Provider PaymentProvider `json:"provider"`
+}
+
+type PaymentResponse struct {
+	ID     string          `json:"id"`
+	Status TransactionStatus `json:"status"`
+	Error  *string         `json:"error,omitempty"`
+}
+
+type Logger interface {
+	LogTransaction(transaction *Transaction)
+}
+
+type PaymentProcessor interface {
+	ProcessPayment(request *PaymentRequest) (*PaymentResponse, error)
+	GetTransaction(id string) (*Transaction, error)
+}
+
+func NewPaymentProcessor(logger Logger) PaymentProcessor {
+	return &paymentProcessor{}
+}
+
+type paymentProcessor struct{}
+
+func (p *paymentProcessor) ProcessPayment(request *PaymentRequest) (*PaymentResponse, error) {
+	return &PaymentResponse{}, nil
+}
+
+func (p *paymentProcessor) GetTransaction(id string) (*Transaction, error) {
+	return &Transaction{}, nil
+}

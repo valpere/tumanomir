@@ -1,0 +1,41 @@
+# Еталонна специфікація (повністю формалізована)
+
+Відтвори рівно ці Go-типи та сигнатури, без змін і без доповнень:
+
+```go
+package payments
+
+import "time"
+
+type TransactionStatus string
+
+const (
+	StatusOK       TransactionStatus = "ok"
+	StatusDeclined TransactionStatus = "declined"
+	StatusError    TransactionStatus = "error"
+)
+
+type Transaction struct {
+	ID             string
+	Amount         int64
+	Currency       string
+	Provider       string
+	IdempotencyKey string
+}
+
+type PaymentLog struct {
+	TxID      string
+	Status    TransactionStatus
+	ErrorCode string
+	CreatedAt time.Time
+}
+
+type Receipt struct {
+	TxID   string
+	Status TransactionStatus
+}
+
+func AcceptTransaction(tx Transaction) (Receipt, error) {}
+
+func LogResult(txID string, status TransactionStatus, errorCode string) error {}
+```

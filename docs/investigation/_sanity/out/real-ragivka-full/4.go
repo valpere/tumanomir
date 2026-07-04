@@ -1,0 +1,286 @@
+package ragivka
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/riverqueue/river"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// Tenant represents a tenant in the system
+type Tenant struct {
+	ID        string `json:"id"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// User represents an end-user interacting via a channel
+type User struct {
+	ID            string `json:"id"`
+	TenantID      string `json:"tenant_id"`
+	ChannelType   string `json:"channel_type"` // telegram/web
+	ChannelID     string `json:"channel_id"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// SessionState represents the state of a conversation session
+type SessionState string
+
+const (
+	SessionActive        SessionState = "active"
+	SessionWaitingForHuman SessionState = "waiting_for_human"
+	SessionCompleted     SessionState = "completed"
+	SessionExpired       SessionState = "expired"
+)
+
+// Session represents a conversation session with FSM
+type Session struct {
+	ID                  string         `json:"id"`
+	TenantID            string         `json:"tenant_id"`
+	State               SessionState   `json:"state"`
+	Version             int            `json:"version"` // optimistic locking
+	OrchestrationTier   int            `json:"orchestration_tier"` // L0-L3
+	Channel             string         `json:"channel"`
+	ExpiresAt           time.Time      `json:"expires_at"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// Message represents an individual chat turn
+type Message struct {
+	ID            string    `json:"id"`
+	SessionID     string    `json:"session_id"`
+	Role          string    `json:"role"` // user/assistant/system
+	Content       string    `json:"content"`
+	CitationRefs  []string  `json:"citation_refs"`
+	TokenCount    int       `json:"token_count"`
+	JobID         *string   `json:"job_id"`
+	CreatedAt     time.Time
+}
+
+// Document represents a raw file uploaded to the knowledge layer
+type Document struct {
+	ID                string    `json:"id"`
+	TenantID          string    `json:"tenant_id"`
+	S3Key             string    `json:"s3_key"`
+	Version           string    `json:"version"`
+	IngestionStatus   string    `json:"ingestion_status"` // pending/indexed/stale
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// Chunk represents a text segment belonging to a document
+type Chunk struct {
+	ID           string    `json:"id"`
+	DocumentID   string    `json:"document_id"`
+	Ordinal      int       `json:"ordinal"`
+	Content      string    `json:"content"`
+	Vector       []float32 `json:"vector"` // pgvector
+	TSVector     string    `json:"ts_vector"` // BM25
+	Metadata     map[string]interface{} `json:"metadata"`
+	CreatedAt    time.Time
+}
+
+// PromptVersion represents a version-controlled system prompt
+type PromptVersion struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Content   string `json:"content"`
+	CreatedAt time.Time
+}
+
+// Artifact represents a generated output file (PDF, Excel)
+type Artifact struct {
+	ID        string    `json:"id"`
+	SessionID string    `json:"session_id"`
+	S3Key     string    `json:"s3_key"`
+	Type      string    `json:"type"` // pdf/excel
+	CreatedAt time.Time
+}
+
+// AuditLog records every write tool execution
+type AuditLog struct {
+	ID                 string `json:"id"`
+	ToolName           string `json:"tool_name"`
+	IdempotencyKey     string `json:"idempotency_key"`
+	RequestHash        string `json:"request_hash"`
+	ResponseHash       string `json:"response_hash"`
+	ApprovalRecord     *string `json:"approval_record"`
+	CreatedAt          time.Time
+}
+
+// RiverJob represents an async task tracked by River
+type RiverJob struct {
+	ID              string    `json:"id"`
+	SessionID       string    `json:"session_id"`
+	TenantID        string    `json:"tenant_id"`
+	IdempotencyKey  string    `json:"idempotency_key"`
+	Payload         []byte    `json:"payload"` // JSONB
+	Attempt         int       `json:"attempt"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// ToolPermission represents permission boundaries for tools
+type ToolPermission string
+
+const (
+	ReadTool   ToolPermission = "read"
+	DraftTool  ToolPermission = "draft"
+	WriteTool  ToolPermission = "write"
+)
+
+// ToolRegistry manages registered tools with permissions
+type ToolRegistry struct {
+	Name            string         `json:"name"`
+	Permission      ToolPermission `json:"permission"`
+	CacheTTL        *time.Duration `json:"cache_ttl"`
+	IsIdempotent    bool           `json:"is_idempotent"`
+	CreatedAt       time.Time
+}
+
+// ModelProvider represents supported LLM providers
+type ModelProvider string
+
+const (
+	OpenAIProvider   ModelProvider = "openai"
+	AnthropicProvider ModelProvider = "anthropic"
+	OpenRouterProvider ModelProvider = "openrouter"
+	GeminiProvider   ModelProvider = "gemini"
+	OfflineProvider  ModelProvider = "offline"
+)
+
+// ModelRouter routes requests to appropriate LLM providers
+type ModelRouter struct {
+	Provider      ModelProvider `json:"provider"`
+	Model         string        `json:"model"`
+	CostPolicy    string        `json:"cost_policy"` // cheap/expensive
+	Fallbacks     []ModelProvider `json:"fallbacks"`
+}
+
+// ChannelAdapter handles different communication channels
+type ChannelAdapter interface {
+	HandleMessage(ctx context.Context, sessionID string, message string) error
+	SendResponse(ctx context.Context, sessionID string, response string) error
+	NotifyHuman(ctx context.Context, sessionID string, notification string) error
+}
+
+// KnowledgeBase manages ingestion and retrieval pipeline
+type KnowledgeBase struct {
+	IngestionPipeline func(ctx context.Context, document *Document) error
+	RetrieveContext   func(ctx context.Context, sessionID string, query string) ([]*Chunk, error)
+	ReRank            func(ctx context.Context, chunks []*Chunk, query string) ([]*Chunk, error)
+}
+
+// ToolLayer manages tool execution with safety boundaries
+type ToolLayer struct {
+	ExecuteReadTool    func(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+	ExecuteDraftTool   func(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+	ExecuteWriteTool   func(ctx context.Context, toolName string, args map[string]interface{}) (interface{}, error)
+	CacheResult        func(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	GetCachedResult    func(ctx context.Context, key string) (interface{}, bool)
+}
+
+// FSM manages conversation state transitions
+type FSM struct {
+	LoadSession      func(ctx context.Context, sessionID string) (*Session, error)
+	UpdateState      func(ctx context.Context, sessionID string, newState SessionState, version int) error
+	Transition       func(ctx context.Context, sessionID string, transitionType string) error
+	CheckTimeout     func(ctx context.Context, sessionID string) error
+}
+
+// Guardrails evaluates LLM outputs for hallucinations and citations
+type Guardrails struct {
+	EvaluateCitationCoverage func(ctx context.Context, answer string, retrievedChunks []*Chunk) (float64, error)
+	ValidateOutput           func(ctx context.Context, output interface{}, schema interface{}) error
+	GenerateCitations        func(ctx context.Context, chunks []*Chunk) ([]string, error)
+}
+
+// Observability tracks metrics and traces
+type Observability struct {
+	TraceRequest     func(ctx context.Context, operation string) (trace.Span, context.Context)
+	LogTokenUsage    func(ctx context.Context, promptTokens int, completionTokens int)
+	LogError         func(ctx context.Context, err error)
+	RecordMetric     func(ctx context.Context, metricName string, value float64)
+}
+
+// Configuration holds system-wide settings
+type Configuration struct {
+	TenantIsolation   bool
+	RateLimiting      bool
+	PIIStripping      bool
+	OfflineMode       bool
+	Multilingual      bool
+	RedisEnabled      bool
+	BackupEnabled     bool
+}
+
+// Service represents the main Ragivka service
+type Service struct {
+	DB           *pgxpool.Pool
+	RiverClient  *river.Client
+	Tracer       trace.Tracer
+	FSM          *FSM
+	Knowledge    *KnowledgeBase
+	Tools        *ToolLayer
+	Guardrails   *Guardrails
+	Observability *Observability
+	Adapters     map[string]ChannelAdapter
+	Registry     *ToolRegistry
+	ModelRouter  *ModelRouter
+	Config       *Configuration
+}
+
+// Initialize initializes the Ragivka service with all components
+func (s *Service) Initialize(ctx context.Context) error {
+	return nil
+}
+
+// Start starts the service workers and API server
+func (s *Service) Start(ctx context.Context) error {
+	return nil
+}
+
+// Shutdown gracefully shuts down the service
+func (s *Service) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+// GetSession returns a session by ID
+func (s *Service) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+	return nil, nil
+}
+
+// CreateSession creates a new conversation session
+func (s *Service) CreateSession(ctx context.Context, tenantID string, channel string) (*Session, error) {
+	return nil, nil
+}
+
+// ProcessMessage handles incoming user messages
+func (s *Service) ProcessMessage(ctx context.Context, sessionID string, message string) error {
+	return nil
+}
+
+// ExecuteTool executes a registered tool with given arguments
+func (s *Service) ExecuteTool(ctx context.Context, sessionID string, toolName string, args map[string]interface{}) (interface{}, error) {
+	return nil, nil
+}
+
+// GenerateAnswer generates an LLM response based on context and prompt
+func (s *Service) GenerateAnswer(ctx context.Context, sessionID string, prompt string, contextChunks []*Chunk) (string, error) {
+	return "", nil
+}
+
+// IngestDocument processes a document through the ingestion pipeline
+func (s *Service) IngestDocument(ctx context.Context, tenantID string, document *Document) error {
+	return nil
+}
+
+// Search retrieves relevant chunks for a query
+func (s *Service) Search(ctx context.Context, sessionID string, query string) ([]*Chunk, error) {
+	return nil, nil
+}
