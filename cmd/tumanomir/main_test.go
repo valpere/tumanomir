@@ -27,8 +27,9 @@ func captureStdout(t *testing.T, fn func() int) (string, int) {
 	// output exceeds it.
 	readDone := make(chan struct{})
 	var buf bytes.Buffer
+	var copyErr error
 	go func() {
-		io.Copy(&buf, r)
+		_, copyErr = io.Copy(&buf, r)
 		close(readDone)
 	}()
 
@@ -38,6 +39,9 @@ func captureStdout(t *testing.T, fn func() int) (string, int) {
 		t.Fatalf("close pipe writer: %v", err)
 	}
 	<-readDone
+	if copyErr != nil {
+		t.Fatalf("read pipe: %v", copyErr)
+	}
 	return buf.String(), code
 }
 
