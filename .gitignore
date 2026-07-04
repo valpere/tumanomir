@@ -38,18 +38,11 @@ go.work.sum
 *.test
 tmp/
 
-# Session recall — per-project, local-only context log
-.claude/session-log.md
-
-# Session recall index — per-project, local-only
-.claude/sessions.db
-
-# fix-review telemetry — per-project, local-only run log
-.claude/skills/fix-review/telemetry.jsonl
-
-# self-learn raw pattern data — solo project, kept local
-_patterns/mistakes.jsonl
-_patterns/wins.jsonl
+# Claude Code project tooling (skills/agents/hooks/session data) and
+# self-learn scaffolding — local to this workspace, not committed (yet).
+.claude/
+_patterns/
+_knowledge-base/
 
 # ~/.gitignore_global has a blanket "_*" rule (for __pycache__ etc.) that
 # would otherwise also swallow docs/investigation/_sanity/ — that directory
