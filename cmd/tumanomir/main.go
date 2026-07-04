@@ -95,13 +95,23 @@ func runCheck(args []string) int {
 	if kd.Value > th.KDriftMax {
 		kdVerdict = internal.VerdictBlock
 	}
+	if kd.Requirements == 0 {
+		// No [REQ-*] tags at all is a distinct signal from a genuine
+		// fully-traced pass (0.00 with N>0) — render it explicitly
+		// rather than let it masquerade as "K_drift: 0.00 [ok]".
+		kdVerdict = internal.VerdictSkipped
+	}
 	dcVerdict := internal.VerdictOK
 	if dc.Value < th.DConstMin {
 		dcVerdict = internal.VerdictWarn // lexical proxy: advisory, not a gate
 	}
 
-	fmt.Printf("  K_drift:  %.2f  [%s]%s(threshold %.2f, %d/%d requirements untraced)\n",
-		kd.Value, kdVerdict, pad(kdVerdict), th.KDriftMax, kd.Hanging, kd.Requirements)
+	if kdVerdict == internal.VerdictSkipped {
+		fmt.Printf("  K_drift:  —     [n/a]%s(no [REQ-*] tags found)\n", pad(kdVerdict))
+	} else {
+		fmt.Printf("  K_drift:  %.2f  [%s]%s(threshold %.2f, %d/%d requirements untraced)\n",
+			kd.Value, kdVerdict, pad(kdVerdict), th.KDriftMax, kd.Hanging, kd.Requirements)
+	}
 	fmt.Printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
 		dc.Value, dcVerdict, pad(dcVerdict), th.DConstMin, dc.ConstraintMarkers, dc.ProseTokens)
 	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)\n")
@@ -124,6 +134,8 @@ func pad(v internal.Verdict) string {
 		return "     "
 	case internal.VerdictWarn:
 		return "   "
+	case internal.VerdictSkipped:
+		return "  "
 	default:
 		return "  "
 	}
