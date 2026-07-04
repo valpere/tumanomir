@@ -104,6 +104,9 @@ func TestAggregate(t *testing.T) {
 		wantReqs      int
 		wantHanging   int
 		wantHangingID []string
+		wantKDValue   float64
+		wantDCMarkers int
+		wantDCProse   int
 	}{
 		{
 			name: "single spec pass",
@@ -115,6 +118,9 @@ func TestAggregate(t *testing.T) {
 			wantReqs:      1,
 			wantHanging:   0,
 			wantHangingID: nil,
+			wantKDValue:   0,
+			wantDCMarkers: 4,
+			wantDCProse:   5,
 		},
 		{
 			name: "K_drift block",
@@ -126,6 +132,9 @@ func TestAggregate(t *testing.T) {
 			wantReqs:      2,
 			wantHanging:   1,
 			wantHangingID: []string{"a.md: REQ-A-02"},
+			wantKDValue:   0.5,
+			wantDCMarkers: 3,
+			wantDCProse:   7,
 		},
 		{
 			name: "D_const warn",
@@ -145,6 +154,9 @@ func TestAggregate(t *testing.T) {
 			wantReqs:      2,
 			wantHanging:   0,
 			wantHangingID: nil,
+			wantKDValue:   0,
+			wantDCMarkers: 6,
+			wantDCProse:   36,
 		},
 		{
 			name: "multi-file aggregation",
@@ -157,6 +169,9 @@ func TestAggregate(t *testing.T) {
 			wantReqs:      3,
 			wantHanging:   2,
 			wantHangingID: []string{"a.md: REQ-A-02", "b.md: REQ-B-01"},
+			wantKDValue:   2.0 / 3.0,
+			wantDCMarkers: 4,
+			wantDCProse:   9,
 		},
 		{
 			name: "zero requirements",
@@ -168,6 +183,9 @@ func TestAggregate(t *testing.T) {
 			wantReqs:      0,
 			wantHanging:   0,
 			wantHangingID: nil,
+			wantKDValue:   0,
+			wantDCMarkers: 0,
+			wantDCProse:   7,
 		},
 	}
 
@@ -194,6 +212,23 @@ func TestAggregate(t *testing.T) {
 				if cr.KD.HangingIDs[i] != id {
 					t.Fatalf("KD.HangingIDs[%d] = %q, want %q; got %+v", i, cr.KD.HangingIDs[i], id, cr)
 				}
+			}
+			const epsilon = 1e-9
+			if diff := cr.KD.Value - tt.wantKDValue; diff > epsilon || diff < -epsilon {
+				t.Fatalf("KD.Value = %v, want %v; got %+v", cr.KD.Value, tt.wantKDValue, cr)
+			}
+			if cr.DC.ConstraintMarkers != tt.wantDCMarkers {
+				t.Fatalf("DC.ConstraintMarkers = %d, want %d; got %+v", cr.DC.ConstraintMarkers, tt.wantDCMarkers, cr)
+			}
+			if cr.DC.ProseTokens != tt.wantDCProse {
+				t.Fatalf("DC.ProseTokens = %d, want %d; got %+v", cr.DC.ProseTokens, tt.wantDCProse, cr)
+			}
+			wantDCValue := 0.0
+			if total := tt.wantDCMarkers + tt.wantDCProse; total > 0 {
+				wantDCValue = float64(tt.wantDCMarkers) / float64(total)
+			}
+			if diff := cr.DC.Value - wantDCValue; diff > epsilon || diff < -epsilon {
+				t.Fatalf("DC.Value = %v, want %v; got %+v", cr.DC.Value, wantDCValue, cr)
 			}
 		})
 	}
