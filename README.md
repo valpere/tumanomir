@@ -77,7 +77,8 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 ## Status
 
 v0.1 in development. See `docs/requirements.md` (written in tumanomir's
-own traceable markup — we eat our own dog food).
+own traceable markup — we eat our own dog food), `docs/architecture.md`
+for how it's built, and `docs/roadmap.md` for what's not built yet.
 
 - `check` (deterministic layer: `K_drift`, `D_const`) is **implemented**.
 - `measure` (stochastic layer: `D_pair`, `H_norm`) is **implemented**
