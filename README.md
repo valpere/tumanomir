@@ -22,6 +22,27 @@ The stochastic layer generates N Go artifacts from your spec via a fixed
 instrument (Ollama) and measures how far apart they land: the wider the
 spread, the foggier the spec.
 
+## Build
+
+Prerequisite: Go >= 1.26.
+
+```bash
+make build     # -> bin/tumanomir
+```
+
+Sample run against tumanomir's own dogfooded spec (`make dogfood` runs the
+same command):
+
+```bash
+bin/tumanomir check docs/requirements.md
+```
+
+```
+  K_drift:  0.00  [ok]     (threshold 0.20, 0/18 requirements untraced)
+  D_const:  0.07  [warn]   (threshold 0.35, 63 markers / 871 prose tokens)
+  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)
+```
+
 ## Usage
 
 ```bash
