@@ -1,72 +1,89 @@
 # CLAUDE.md — tumanomir
 
-Вимірювальний інструмент точності специфікацій для AI-проєктів (CLI, Go).
-Продуктизація методології статті «Джерело Невідомості».
+> **Language note:** this file is English for accessibility to non-Ukrainian
+> contributors, external reviewers, and AI tooling — see issue #21. It does
+> **not** change how sessions on this project are conducted: Val
+> communicates in Ukrainian, per his standing convention for personal
+> projects; only this document's own text is English. This file (English)
+> is now the actively maintained, auto-loaded version — future edits to
+> conventions/invariants land here first. [`CLAUDE.uk.md`](CLAUDE.uk.md) is
+> the pre-translation Ukrainian snapshot, kept for reference; it may drift
+> if not updated alongside future changes here.
 
-## З чого починати в новій сесії
+Specification-precision measurement tool for AI-driven projects (CLI, Go).
+Productization of the methodology from the article "Source of the Unknown".
 
-1. Прочитай `docs/requirements.md` — **специфікація первинна**; код пишеться
-   під неї, а не навпаки. Вона в розмітці самого tumanomir
-   (`[REQ-*] -> [FUN-*]`, `@schema`) — dogfooding. Це стосується процесу
-   розробки цієї реалізації: специфікація тут — контрольний артефакт, з
-   яким звіряється код. Сама методологія натомість трактує специфікації як
-   невизначені цілі вимірювання, чию точність і вимірює tumanomir, а не як
-   джерело істини — протиріччя тут уявне: перше про дисципліну розробки,
-   друге про предмет вимірювання.
-2. `docs/investigation/history.md` — провенанс проєкту: звідки методологія,
-   які рішення вже ухвалені й чому. `docs/investigation/design.md` — дизайн
-   v0.1. Усе, що потрібно рецензенту чи стороннньому агенту, лежить у
-   репозиторії (`/home/val/wrk/projects/tumanomir/tumanomir`) — на
-   `../context/` більше не посилатися, робоча зона рецензій обмежена репо.
-3. Поточний стан коду — spike детермінованого ядра + порт dispersion
-   з експерименту статті; звіряй з requirements, розбіжність — це баг
-   або в коді, або в requirements (спершу онови requirements).
+## Where to start in a new session
 
-## Методологічні інваріанти (не змінювати мовчки; спершу requirements)
+1. Read `docs/requirements.md` — **the specification is primary**; code is
+   written to match it, not the other way around. It's written in
+   tumanomir's own markup (`[REQ-*] -> [FUN-*]`, `@schema`) — dogfooding.
+   This applies to how *this implementation's* development process works:
+   here, the specification is the controlling artifact code is checked
+   against. The methodology itself, by contrast, treats specifications as
+   uncertain measurement targets — the very thing tumanomir measures the
+   precision of — not as a source of truth. The apparent contradiction is
+   illusory: the first statement is about development discipline, the
+   second is about the subject of measurement.
+2. `docs/investigation/history.md` — the project's provenance: where the
+   methodology came from, which decisions were already made and why.
+   `docs/investigation/design.md` — the v0.1 design. Everything a reviewer
+   or external agent needs lives in the repository
+   (`/home/val/wrk/projects/tumanomir/tumanomir`) — `../context/` is no
+   longer referenced; the review surface is limited to the repo.
+3. Current code state — a spike of the deterministic core plus a port of
+   the dispersion experiment; check it against requirements — a mismatch
+   is a bug, either in the code or in the requirements (update requirements
+   first).
 
-- **D_pair** (1 − mean pairwise AST sim) — робоча метрика; **H_norm**
-  (= H / log₂N, нормалізована ентропія кластерів) — лише ordinal-сигнал
-  («один кластер чи багато»), саме вона репортиться/гейтиться. Сира **H**
-  (біти) обчислюється внутрішньо, але сатурує на log₂N при малих N і тому
-  сама по собі непорівнянна між різними N.
-- Всі стохастичні виміри **instrument-relative**: конфігурація приладу
-  (модель+версія, промпт, temp, N, think, num_ctx, поріг кластеризації)
-  фіксується і друкується в кожному звіті.
-- **invalid rate** звітується, не ховається (retry з лічильником discards).
-- Пороги за замовчуванням (0.20/0.35/0.30) — **гіпотези** зі статті,
-  не константи; в usage-тексті так і писати.
-- Детермінований шар (`check`) — нуль мережі, нуль LLM. Git-hook-ready.
-- Ollama: `think: false` для reasoning-моделей; `num_ctx` мусить вміщати
-  промпт (мовчазне обрізання = баг цілісності виміру); `num_predict`
-  вище природної довжини виходу.
+## Methodological invariants (do not change silently; requirements first)
 
-## Побудова та перевірка
+- **D_pair** (1 − mean pairwise AST sim) — the working metric; **H_norm**
+  (= H / log₂N, normalized cluster entropy) is an ordinal signal only
+  ("one cluster or many"), and it's the one actually reported/gated on.
+  Raw **H** (bits) is computed internally but saturates at log₂N for small
+  N and so is not comparable across different N by itself.
+- All stochastic measurements are **instrument-relative**: the instrument
+  configuration (model+version, prompt, temp, N, think, num_ctx,
+  clustering threshold) is fixed and printed in every report.
+- **Invalid rate** is reported, never hidden (retry with a discard
+  counter).
+- Default thresholds (0.20/0.35/0.30) are **hypotheses** from the article,
+  not constants — state this explicitly in usage text.
+- The deterministic layer (`check`) — zero network, zero LLM. Git-hook-ready.
+- Ollama: `think: false` for reasoning models; `num_ctx` must fit the
+  prompt (silent truncation = a measurement-integrity bug); `num_predict`
+  above the natural output length.
 
-Бінарник збирається в `bin/` через `make`, не `go build`/`go run` напряму.
+## Build and verify
+
+The binary is built into `bin/` via `make`, not `go build`/`go run` directly.
 
 ```bash
 make build     # -> bin/tumanomir
 make vet
 make test
-make dogfood   # bin/tumanomir check docs/requirements.md — dogfood-смоук
-make lint      # golangci-lint run (потребує встановленого golangci-lint)
-make ci        # build + vet + test + lint + dogfood, усе разом
+make dogfood   # bin/tumanomir check docs/requirements.md — dogfood smoke test
+make lint      # golangci-lint run (requires golangci-lint installed)
+make ci        # build + vet + test + lint + dogfood, all together
 ```
 
-## Конвенції
+## Conventions
 
-- Go ≥ 1.26, stdlib-only у v0.1 (без CLI-фреймворків і YAML-залежностей).
-- Типи: спільні — `internal/types.go`; пакетні — `internal/<pkg>/` (типи
-  вищого рівня мають пріоритет при конфліктах).
-- Код/коментарі/повідомлення — English; спілкування в сесії — українська.
-- Гілки: `<type>-<slug>` від main; у main напряму не комітити.
-- Reference-дані для тестів dispersion: згенеровані файли з експерименту
-  статті — `docs/investigation/_sanity/out*/` (120 файлів, тепер у репо;
-  `_`-префікс — щоб `go build ./...`/`go vet ./...` це ігнорували, це не
-  Go-пакети). Реальні еталонні числа в `docs/investigation/_sanity/README.md`.
-  Це повний архівний корпус; `internal/dispersion/testdata/` — фактичне
-  місце фікстур для майбутніх тестів `internal/dispersion` (Go-конвенція
-  `testdata/`, автоматично ігнорується збіркою): підмножина "sharp" з
-  обох інструментів, з власним README та еталонними числами.
-  Оригінальна стаття — `docs/investigation/SourceOfTheUnknown.md`; 11 звітів
-  зовнішніх рецензій — `docs/investigation/reports/`.
+- Go >= 1.26, stdlib-only in v0.1 (no CLI frameworks, no YAML dependencies).
+- Types: shared ones in `internal/types.go`; package-specific in
+  `internal/<pkg>/` (higher-level types take priority on conflicts).
+- Code/comments/messages — English; session communication — Ukrainian
+  (see the language note at the top of this file).
+- Branches: `<type>-<slug>` off main; never commit directly to main.
+- Reference data for dispersion tests: generated files from the article's
+  experiment — `docs/investigation/_sanity/out*/` (120 files, now in-repo;
+  the `_` prefix keeps `go build ./...`/`go vet ./...` from treating them
+  as Go packages). Real reference numbers are in
+  `docs/investigation/_sanity/README.md`. That's the full archival corpus;
+  `internal/dispersion/testdata/` is the actual fixture location for
+  future `internal/dispersion` tests (Go's `testdata/` convention,
+  auto-excluded from the build): a "sharp" subset from both instruments,
+  with its own README and reference numbers.
+  The original article is `docs/investigation/SourceOfTheUnknown.md`; the
+  11 external review reports are in `docs/investigation/reports/`.
