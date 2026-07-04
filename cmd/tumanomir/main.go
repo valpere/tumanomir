@@ -195,7 +195,13 @@ type measureResult struct {
 	DPairVerdict internal.Verdict
 	DiscardRate  float64 // Discarded / (Discarded + N), 0 if no attempts made
 	DiscardWarn  bool    // DiscardRate > 0.40 (REQ-MSR-05's hypothesis threshold)
-	Truncated    int     // count of accepted (valid) generations with DoneReason == "length" (REQ-MSR-06)
+	// Truncated is the count of accepted (valid) generations with
+	// DoneReason == instrument.DoneReasonLength (REQ-MSR-06). It lives
+	// here rather than on internal.DispersionResult because it's an
+	// instrument/generation-loop concept (which backend, why a
+	// generation stopped), not something dispersion.Analyze's pure
+	// AST-similarity computation has any business knowing about.
+	Truncated int
 }
 
 // runMeasure parses flags, validates the positional spec-file argument,
@@ -351,7 +357,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 				// done_reason signal closes: accept the sample (it IS valid
 				// Go), but flag it so the report can warn that its AST may
 				// not reflect the model's full intended output.
-				if g.DoneReason == "length" {
+				if g.DoneReason == instrument.DoneReasonLength {
 					truncated++
 				}
 				break
