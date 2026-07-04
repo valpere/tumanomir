@@ -1,0 +1,37 @@
+package payment
+
+import (
+	"time"
+)
+
+type UUID string
+type Decimal string
+
+type Transaction struct {
+	ID                UUID     `json:"id"`
+	Amount            Decimal  `json:"amount"`
+	Currency          string   `json:"currency"`
+	Provider          string   `json:"provider"`
+	IdempotencyKey    UUID     `json:"idempotency_key"`
+}
+
+type Receipt struct {
+	ID        UUID     `json:"id"`
+	Status    string   `json:"status"`
+	Error     *string  `json:"error,omitempty"`
+}
+
+type PaymentLog struct {
+	TxID        UUID     `json:"tx_id"`
+	Status      string   `json:"status"`
+	ErrorCode   *string  `json:"error_code,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func AcceptTransaction(tx Transaction) (Receipt, error) {
+	panic("not implemented")
+}
+
+func LogResult(txID, status, errorCode string) {
+	panic("not implemented")
+}

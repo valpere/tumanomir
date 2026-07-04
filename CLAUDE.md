@@ -56,5 +56,9 @@ make ci        # build + vet + test + lint + dogfood, усе разом
   статті — `docs/investigation/_sanity/out*/` (120 файлів, тепер у репо;
   `_`-префікс — щоб `go build ./...`/`go vet ./...` це ігнорували, це не
   Go-пакети). Реальні еталонні числа в `docs/investigation/_sanity/README.md`.
+  Це повний архівний корпус; `internal/dispersion/testdata/` — фактичне
+  місце фікстур для майбутніх тестів `internal/dispersion` (Go-конвенція
+  `testdata/`, автоматично ігнорується збіркою): підмножина "sharp" з
+  обох інструментів, з власним README та еталонними числами.
   Оригінальна стаття — `docs/investigation/SourceOfTheUnknown.md`; 11 звітів
   зовнішніх рецензій — `docs/investigation/reports/`.
