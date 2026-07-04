@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -22,8 +23,13 @@ func TestNoNetworkImports(t *testing.T) {
 	}
 
 	for _, pattern := range pkgPatterns {
-		out, err := exec.Command("go", "list", "-f", "{{.Deps}}", pattern).Output()
+		cmd := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.Deps}}", pattern)
+		out, err := cmd.Output()
 		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				t.Fatalf("go list -f {{.Deps}} %s: %v\nstderr:\n%s", pattern, err, exitErr.Stderr)
+			}
 			t.Fatalf("go list -f {{.Deps}} %s: %v", pattern, err)
 		}
 
@@ -50,4 +56,30 @@ func parseDeps(out string) []string {
 		deps = append(deps, strings.Fields(line)...)
 	}
 	return deps
+}
+
+func TestParseDeps(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "[]\n", nil},
+		{"single", "[fmt]\n", []string{"fmt"}},
+		{"multiple", "[fmt strings errors]\n", []string{"fmt", "strings", "errors"}},
+		{"multi-line from ... pattern", "[fmt strings]\n[errors net/http]\n", []string{"fmt", "strings", "errors", "net/http"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDeps(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseDeps(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i, dep := range tt.want {
+				if got[i] != dep {
+					t.Fatalf("parseDeps(%q)[%d] = %q, want %q", tt.in, i, got[i], dep)
+				}
+			}
+		})
+	}
 }
