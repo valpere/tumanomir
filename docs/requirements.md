@@ -25,7 +25,8 @@ own specification (dogfooding).
   samples: Int @constraint(default: 10, min: 2),
   think: Bool @constraint(default: false),
   num_ctx: Int @constraint(rule: "must exceed prompt token count"),
-  num_predict: Int @constraint(rule: "must exceed natural output length")
+  num_predict: Int @constraint(rule: "must exceed natural output length"),
+  sim_threshold: Float @constraint(default: 0.95, range: [0,1], rule: "no default currently wired in code — SimThreshold is a caller-supplied parameter to dispersion.Analyze; 0.95 is a proposed hypothesis default matching the article's experiment, not a calibrated constant")
 }
 
 @schema Report {
@@ -85,6 +86,19 @@ own specification (dogfooding).
 7. [REQ-MSR-01] The tool must measure D_pair = 1 − mean pairwise
    structural AST similarity over N generated Go artifacts from one spec.
    -> [FUN-MSR-01] dispersion.Analyze(sources [][]byte, simThreshold float64) DispersionResult
+
+   "Mean pairwise structural AST similarity" is defined operationally,
+   not left to inference: each generated source is parsed with `go/ast`
+   into a bag-of-features vector keyed by structural tokens — type and
+   struct/interface declarations, field names with their type strings,
+   interface methods, func declarations (with receiver type folded into
+   the key) and their signatures, and top-level const/value names.
+   Cosine similarity is computed between every pair of feature vectors
+   and averaged over all N(N-1)/2 pairs to give the mean similarity that
+   D_pair is one minus. The authoritative implementation — including the
+   exact feature-key format — is `internal/dispersion/astfeat.go`; this
+   requirement points to it rather than duplicating it, so the two must
+   not drift.
 
 8. [REQ-MSR-02] Cluster entropy H (Shannon, over single-linkage clusters
    at a configurable similarity threshold) and its normalized form
