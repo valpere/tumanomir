@@ -19,6 +19,7 @@ const usage = `tumanomir — specification-precision measurement for AI projects
 
 Usage:
   tumanomir check [flags] <file.md|dir>   deterministic layer: K_drift, D_const
+  tumanomir measure                       not yet implemented — v0.1 roadmap
   tumanomir version
 
 Flags for check:
@@ -103,7 +104,7 @@ func runCheck(args []string) int {
 		kd.Value, kdVerdict, pad(kdVerdict), th.KDriftMax, kd.Hanging, kd.Requirements)
 	fmt.Printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
 		dc.Value, dcVerdict, pad(dcVerdict), th.DConstMin, dc.ConstraintMarkers, dc.ProseTokens)
-	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)\n")
+	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)\n")
 
 	for _, id := range kd.HangingIDs {
 		fmt.Printf("    hanging: %s\n", id)
