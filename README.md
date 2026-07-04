@@ -74,6 +74,22 @@ own traceable markup — we eat our own dog food).
 - `measure` (stochastic layer: `D_pair`, `H_norm`) is **specified**
   (`docs/requirements.md` §2.2, REQ-MSR-01..06) but **not yet implemented**.
 
+## Limitations
+
+`D_pair` measures generation spread at a **fixed instrument** (model +
+prompt + temperature + N). By itself, it cannot separate how much of that
+spread comes from spec ambiguity versus inherent model stochasticity/noise.
+Without a calibration baseline across multiple instruments/models (the
+roadmap `calibrate` command), a single `D_pair` number should be read as
+"spread under this specific instrument," not as an instrument-independent
+measure of "how foggy the spec truly is."
+
+The "copy-floor" reference point (feeding the model already-complete,
+unambiguous Go type definitions produced `H=0` in the source experiment) is
+instrument-dependent, not a universal floor guaranteed by the metric — a
+different or weaker model might not reach zero entropy even on a fully
+unambiguous spec.
+
 ## License
 
 [Apache License 2.0](LICENSE).
