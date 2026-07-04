@@ -136,8 +136,12 @@ own specification (dogfooding).
 12. [REQ-MSR-06] For reasoning-capable models the instrument must set
     think=false; requests must set num_ctx and num_predict explicitly.
     Silent truncation of the input spec is a measurement-integrity bug.
+    Truncation of the *output* must also be detected and surfaced: the
+    backend's own done_reason ("stop" vs. "length") is a direct signal,
+    stronger than inferring truncation from EvalCount == NumPredict alone.
     -> [FUN-MSR-06] instrument.Ollama request builder; prompt-size check
-       against num_ctx before the run
+       against num_ctx before the run; Generation.DoneReason surfaced from
+       the backend response and flagged in measure's report
 
 ### 2.3 Output and gating
 

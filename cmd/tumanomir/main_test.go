@@ -474,6 +474,55 @@ func TestRunMeasureWithGeneratorDiscardWarnThreshold(t *testing.T) {
 	}
 }
 
+// TestRunMeasureWithGeneratorCountsTruncated verifies that an accepted
+// (valid-Go) generation with DoneReason=="length" is counted in
+// measureResult.Truncated, distinct from Discarded — REQ-MSR-06's
+// measurement-integrity gap: a truncated-but-parseable sample is still
+// accepted into N, not silently treated as a clean sample.
+func TestRunMeasureWithGeneratorCountsTruncated(t *testing.T) {
+	// slot 0: valid, done_reason=stop (clean).
+	// slot 1: valid, done_reason=length (truncated, still accepted).
+	// slot 2: valid, done_reason=length (truncated, still accepted).
+	responses := []instrument.Generation{
+		{Text: goBlock(testSrcFoo), DoneReason: "stop"},
+		{Text: goBlock(testSrcFoo), DoneReason: "length"},
+		{Text: goBlock(testSrcFoo), DoneReason: "length"},
+	}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return responses[call], nil
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 3, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.Dispersion.Discarded != 0 {
+		t.Fatalf("Discarded = %d, want 0; got %+v", mr.Dispersion.Discarded, mr)
+	}
+	if mr.Dispersion.N != 3 {
+		t.Fatalf("N = %d, want 3 (truncated-but-valid samples are still accepted); got %+v", mr.Dispersion.N, mr)
+	}
+	if mr.Truncated != 2 {
+		t.Fatalf("Truncated = %d, want 2; got %+v", mr.Truncated, mr)
+	}
+}
+
+// TestRunMeasureWithGeneratorNoTruncation verifies Truncated stays 0 when
+// no accepted generation reports done_reason=length.
+func TestRunMeasureWithGeneratorNoTruncation(t *testing.T) {
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return instrument.Generation{Text: goBlock(testSrcFoo), DoneReason: "stop"}, nil
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 3, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.Truncated != 0 {
+		t.Fatalf("Truncated = %d, want 0; got %+v", mr.Truncated, mr)
+	}
+}
+
 func TestPrintMeasureResultDiscardWarningVisibility(t *testing.T) {
 	warnMR := measureResult{
 		Dispersion:  internal.DispersionResult{N: 2, Discarded: 8},
@@ -491,6 +540,30 @@ func TestPrintMeasureResultDiscardWarningVisibility(t *testing.T) {
 	out, _ = captureStdout(t, func() int { printMeasureResult(noWarnMR, testThresholds); return 0 })
 	if strings.Contains(out, "discard rate") {
 		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
+	}
+}
+
+// TestPrintMeasureResultTruncationWarningVisibility verifies the
+// done_reason=length truncation warning (REQ-MSR-06) appears when
+// Truncated > 0 and is absent when Truncated == 0 — a separate line from
+// the discard-rate warning, since the two flag distinct failure modes.
+func TestPrintMeasureResultTruncationWarningVisibility(t *testing.T) {
+	truncMR := measureResult{
+		Dispersion: internal.DispersionResult{N: 10, Discarded: 0},
+		Config:     internal.InstrumentConfig{Backend: "ollama", Model: "test"},
+		Truncated:  3,
+	}
+	out, _ := captureStdout(t, func() int { printMeasureResult(truncMR, testThresholds); return 0 })
+	wantWarn := "3/10 accepted generations had done_reason=length"
+	if !strings.Contains(out, wantWarn) {
+		t.Fatalf("want a truncation warning line containing %q for Truncated=3, got:\n%s", wantWarn, out)
+	}
+
+	noTruncMR := truncMR
+	noTruncMR.Truncated = 0
+	out, _ = captureStdout(t, func() int { printMeasureResult(noTruncMR, testThresholds); return 0 })
+	if strings.Contains(out, "done_reason=length") {
+		t.Fatalf("must not print the truncation warning when Truncated=0, got:\n%s", out)
 	}
 }
 

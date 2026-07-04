@@ -6,15 +6,30 @@ package instrument
 
 import "context"
 
+// DoneReasonLength is the backend-reported stop reason indicating output
+// was cut off by the generation length limit (num_predict for Ollama) —
+// the direct truncation signal Generation.DoneReason carries. Exported as
+// a named constant, not a string literal at call sites, so a typo can't
+// silently defeat the REQ-MSR-06 truncation check.
+const DoneReasonLength = "length"
+
+// DoneReasonStop is the backend-reported stop reason for a generation that
+// completed naturally (the model emitted its own stop token/sequence).
+const DoneReasonStop = "stop"
+
 // Generation is one instrument response, carrying both the generated text
 // and the backend's own token-count telemetry. PromptEvalCount and
 // EvalCount are ground truth for detecting the truncation failure modes
 // REQ-MSR-06 exists to prevent — e.g. EvalCount == NumPredict strongly
 // suggests the output was cut off rather than stopping naturally.
+// DoneReason ("stop" vs "length" for Ollama) is a stronger, direct signal
+// than inferring truncation from EvalCount == NumPredict — prefer it when
+// available and non-empty.
 type Generation struct {
 	Text            []byte // generated content
 	PromptEvalCount int    // tokens the backend counted in the prompt
 	EvalCount       int    // tokens the backend generated
+	DoneReason      string // backend-reported stop reason, e.g. "stop"/"length" for Ollama
 }
 
 // Generator is the pluggable instrument interface. v0.1 ships one backend,
