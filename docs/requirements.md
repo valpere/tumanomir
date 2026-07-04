@@ -82,32 +82,32 @@ own specification (dogfooding).
 
 ### 2.2 Stochastic layer (`measure` command)
 
-6. [REQ-MSR-01] The tool must measure D_pair = 1 − mean pairwise
+7. [REQ-MSR-01] The tool must measure D_pair = 1 − mean pairwise
    structural AST similarity over N generated Go artifacts from one spec.
    -> [FUN-MSR-01] dispersion.Analyze(sources [][]byte, simThreshold float64) DispersionResult
 
-7. [REQ-MSR-02] Cluster entropy H (Shannon, over single-linkage clusters
+8. [REQ-MSR-02] Cluster entropy H (Shannon, over single-linkage clusters
    at a configurable similarity threshold) and its normalized form
    H_norm = H/log2(N) must be reported as ordinal signals, never as the
    primary gate metric.
    -> [FUN-MSR-02] DispersionResult{H, HNorm, Clusters, SimThresh}
 
-8. [REQ-MSR-03] Generation must go through a pluggable instrument
+9. [REQ-MSR-03] Generation must go through a pluggable instrument
    interface; v0.1 ships one backend: Ollama chat API.
    -> [FUN-MSR-03] instrument.Generator interface; instrument.Ollama
 
-9. [REQ-MSR-04] The full instrument configuration (backend, model,
-   temperature, N, think mode, num_ctx, num_predict, sim threshold)
-   must be fixed per run and printed in the report — measurements are
-   instrument-relative and meaningless without it.
-   -> [FUN-MSR-04] InstrumentConfig serialized into Report header
+10. [REQ-MSR-04] The full instrument configuration (backend, model,
+    temperature, N, think mode, num_ctx, num_predict, sim threshold)
+    must be fixed per run and printed in the report — measurements are
+    instrument-relative and meaningless without it.
+    -> [FUN-MSR-04] InstrumentConfig serialized into Report header
 
-10. [REQ-MSR-05] Generations that fail Go parsing must be retried up to a
+11. [REQ-MSR-05] Generations that fail Go parsing must be retried up to a
     bounded limit and the discard count must be reported as invalid rate;
     hiding invalid generations is forbidden.
     -> [FUN-MSR-05] measure loop: retry ≤ 2 per sample; DispersionResult.Discarded
 
-11. [REQ-MSR-06] For reasoning-capable models the instrument must set
+12. [REQ-MSR-06] For reasoning-capable models the instrument must set
     think=false; requests must set num_ctx and num_predict explicitly.
     Silent truncation of the input spec is a measurement-integrity bug.
     -> [FUN-MSR-06] instrument.Ollama request builder; prompt-size check
@@ -115,16 +115,16 @@ own specification (dogfooding).
 
 ### 2.3 Output and gating
 
-12. [REQ-OUT-01] Human-readable TTY output: one line per metric with
+13. [REQ-OUT-01] Human-readable TTY output: one line per metric with
     value, verdict (ok/warn/block) and the threshold it was judged
     against.
     -> [FUN-OUT-01] report.Render(w io.Writer, r Report)
 
-13. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
+14. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
     failed, 2 = execution error. CI-composable by construction.
     -> [FUN-OUT-02] Report.exit_code
 
-14. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
+15. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
     the article's hypothesis values (0.20 / 0.35 / 0.30) and must be
     documented as uncalibrated starting points.
     -> [FUN-CFG-01] internal.DefaultThresholds(); flag wiring in cmd
@@ -133,15 +133,15 @@ own specification (dogfooding).
 
 ## 3. Non-functional requirements
 
-15. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+16. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms (single pass, no allocations proportional to marker count).
     -> [PHY-NFR-01] benchmark in internal/metrics
 
-16. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only for v0.1
+17. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only for v0.1
     (no CLI frameworks, no YAML deps until the gate command exists).
     -> [PHY-NFR-02] go.mod with zero external requires
 
-17. [REQ-NFR-03] Methodology invariants must not be silently changed:
+18. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.
