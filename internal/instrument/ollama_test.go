@@ -3,10 +3,13 @@ package instrument
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valpere/tumanomir/internal"
 )
@@ -173,5 +176,41 @@ func TestNewOllamaDefaultsBaseURL(t *testing.T) {
 	o := NewOllama(baseConfig())
 	if o.baseURL() != defaultBaseURL {
 		t.Fatalf("want default base URL %q, got %q", defaultBaseURL, o.baseURL())
+	}
+}
+
+func TestOllamaGenerateTimesOut(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(chatResponse{
+			Message: chatMessage{Role: "assistant", Content: "package main"},
+			Done:    true,
+		})
+	}))
+	defer srv.Close()
+
+	o := &Ollama{BaseURL: srv.URL, Config: baseConfig(), Timeout: 50 * time.Millisecond}
+	_, err := o.Generate(t.Context(), "generate a Go file")
+	if err == nil {
+		t.Fatal("want timeout error, got nil")
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("want a net.Error with Timeout()==true (client-side deadline), got %v", err)
+	}
+}
+
+func TestOllamaTimeoutZeroFallsBackToDefault(t *testing.T) {
+	o := &Ollama{Config: baseConfig()}
+	if got := o.timeout(); got != defaultTimeout {
+		t.Fatalf("timeout() with zero-value Timeout = %v, want defaultTimeout (%v)", got, defaultTimeout)
+	}
+}
+
+func TestOllamaHTTPClientNotOverriddenWhenCallerSupplied(t *testing.T) {
+	callerClient := &http.Client{Timeout: 7 * time.Second}
+	o := &Ollama{HTTPClient: callerClient, Timeout: 50 * time.Millisecond, Config: baseConfig()}
+	if got := o.httpClient(); got != callerClient {
+		t.Fatalf("want httpClient() to return the caller-supplied client unmodified, got %+v", got)
 	}
 }

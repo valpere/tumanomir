@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/valpere/tumanomir/internal"
 )
@@ -15,15 +16,27 @@ import (
 // defaultBaseURL is used when Ollama.BaseURL is the zero value.
 const defaultBaseURL = "http://localhost:11434"
 
+// defaultTimeout is used when Ollama.Timeout is the zero value. It's a
+// generous safety bound against a truly hung connection, not a tight SLA —
+// local models on modest hardware can be slow.
+const defaultTimeout = 5 * time.Minute
+
 // Ollama is the v0.1 Generator backend, talking to Ollama's /api/chat
 // endpoint (stream:false, one complete JSON object per request).
 //
 // BaseURL defaults to defaultBaseURL ("http://localhost:11434") when empty.
-// HTTPClient defaults to http.DefaultClient when nil. Use NewOllama for a
-// constructed instance with Config set, or build the struct directly and
-// rely on the zero-value defaults for BaseURL/HTTPClient.
+// HTTPClient defaults to a client with a defaultTimeout timeout when nil.
+// Use NewOllama for a constructed instance with Config set, or build the
+// struct directly and rely on the zero-value defaults for
+// BaseURL/HTTPClient/Timeout.
 type Ollama struct {
-	BaseURL    string
+	BaseURL string
+
+	// Timeout bounds each HTTP request to Ollama's /api/chat. Zero means
+	// defaultTimeout (5 minutes) is used. Ignored if HTTPClient is set
+	// explicitly — the caller owns that client's timeout behavior.
+	Timeout time.Duration
+
 	HTTPClient *http.Client
 	Config     internal.InstrumentConfig
 }
@@ -159,5 +172,13 @@ func (o *Ollama) httpClient() *http.Client {
 	if o.HTTPClient != nil {
 		return o.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: o.timeout()}
+}
+
+// timeout returns o.Timeout if non-zero, else defaultTimeout.
+func (o *Ollama) timeout() time.Duration {
+	if o.Timeout != 0 {
+		return o.Timeout
+	}
+	return defaultTimeout
 }
