@@ -47,6 +47,10 @@ own specification (dogfooding).
    a requirement is a `[REQ-*]` tag; a trace edge is `-> [FUN-*]`,
    `-> [LOG-*]` or `-> [PHY-*]` appearing before the next `[REQ-*]` tag.
    -> [FUN-CHK-01] metrics.KDrift(doc []byte) KDriftResult
+   When a spec (or aggregated corpus) has zero `[REQ-*]` tags, `check`
+   must render K_drift as an explicit "no requirements found" signal
+   (verdict `skipped`), not a numeric `0.00` pass — the two are not the
+   same measurement and must not be visually indistinguishable.
 
 2. [REQ-CHK-02] K_drift output must list the identifiers of hanging
    requirements, not only the ratio — the metric must be actionable.
