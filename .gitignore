@@ -36,6 +36,7 @@ go.work.sum
 # itself; keep this anchored and scoped to bin/ only).
 /bin/
 *.test
+tmp/
 
 # Session recall — per-project, local-only context log
 .claude/session-log.md
