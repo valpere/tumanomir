@@ -38,6 +38,7 @@ Flags for measure:
   --num-ctx        int     required: context window; must exceed the prompt token count
   --num-predict    int     required: max generated tokens; must exceed natural output length
   --think          bool    enable reasoning-model think mode (default false)
+  --d-pair-max     float   gate: max 1-minus-mean-pairwise-AST-similarity (default 0.30)
 
 Default thresholds are uncalibrated hypotheses from the methodology
 article; tune them on your own spec corpus.
@@ -209,6 +210,7 @@ type measureResult struct {
 // runMeasureWithGenerator for the testable retry/discard/analyze logic,
 // then prints the report.
 func runMeasure(args []string) int {
+	th := internal.DefaultThresholds()
 	fs := flag.NewFlagSet("measure", flag.ExitOnError)
 
 	var (
@@ -228,6 +230,7 @@ func runMeasure(args []string) int {
 	fs.IntVar(&numCtx, "num-ctx", 0, "required: context window; must exceed the prompt token count")
 	fs.IntVar(&numPredict, "num-predict", 0, "required: max generated tokens; must exceed natural output length")
 	fs.BoolVar(&think, "think", false, "enable reasoning-model think mode")
+	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	_ = fs.Parse(args)
 
 	if instrumentFlag == "" {
@@ -304,7 +307,6 @@ func runMeasure(args []string) int {
 	// would switch on cfg.Backend here.
 	gen := instrument.NewOllama(cfg)
 
-	th := internal.DefaultThresholds()
 	mr, err := runMeasureWithGenerator(gen, cfg, specContent, samples, th)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "measure:", err)
