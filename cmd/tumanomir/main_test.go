@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/valpere/tumanomir/internal"
+	"github.com/valpere/tumanomir/internal/instrument"
 	"github.com/valpere/tumanomir/internal/spec"
 )
 
@@ -28,6 +31,40 @@ func captureStdout(t *testing.T, fn func() int) (string, int) {
 	// Drain the pipe concurrently: the OS pipe buffer is finite (~64KB on
 	// Linux), so reading only after fn() returns would deadlock once
 	// output exceeds it.
+	readDone := make(chan struct{})
+	var buf bytes.Buffer
+	var copyErr error
+	go func() {
+		_, copyErr = io.Copy(&buf, r)
+		close(readDone)
+	}()
+
+	code := fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	<-readDone
+	if copyErr != nil {
+		t.Fatalf("read pipe: %v", copyErr)
+	}
+	return buf.String(), code
+}
+
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns
+// everything written to it, using the same pipe-deadlock-safe
+// goroutine-drain design as captureStdout.
+func captureStderr(t *testing.T, fn func() int) (string, int) {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+
 	readDone := make(chan struct{})
 	var buf bytes.Buffer
 	var copyErr error
@@ -229,6 +266,302 @@ func TestAggregate(t *testing.T) {
 			}
 			if diff := cr.DC.Value - wantDCValue; diff > epsilon || diff < -epsilon {
 				t.Fatalf("DC.Value = %v, want %v; got %+v", cr.DC.Value, wantDCValue, cr)
+			}
+		})
+	}
+}
+
+// errFakeGenerate is a sentinel error simulating a hard instrument
+// failure (network/HTTP/preflight) from a fake Generator.
+var errFakeGenerate = errors.New("fake generator: simulated hard failure")
+
+// fakeGenerator is a test double for instrument.Generator: no real network
+// calls, responses driven by an injected function keyed on call index.
+type fakeGenerator struct {
+	fn    func(call int) (instrument.Generation, error)
+	calls int
+}
+
+func (f *fakeGenerator) Generate(_ context.Context, _ string) (instrument.Generation, error) {
+	call := f.calls
+	f.calls++
+	return f.fn(call)
+}
+
+// goBlock wraps src in the exact fenced form ExtractGoBlock expects.
+func goBlock(src string) []byte {
+	return []byte("```go\n" + src + "\n```\n")
+}
+
+const (
+	testSrcFoo = `package a
+
+type Foo struct {
+	X int
+}
+
+func DoFoo(x int) error { return nil }
+`
+	testSrcBar = `package b
+
+type Bar interface {
+	Baz()
+}
+
+const Qux = 1
+`
+)
+
+var testThresholds = internal.DefaultThresholds()
+
+func genOK(text []byte) (instrument.Generation, error) {
+	return instrument.Generation{Text: text}, nil
+}
+
+func TestRunMeasureWithGeneratorLowDPairAllValid(t *testing.T) {
+	// All four samples are byte-identical Foo sources, so every pairwise
+	// cosine similarity is 1.0 and D_pair == 0.00 — well under DPairMax.
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 4, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.Dispersion.Discarded != 0 {
+		t.Fatalf("Discarded = %d, want 0; got %+v", mr.Dispersion.Discarded, mr)
+	}
+	if mr.Dispersion.N != 4 {
+		t.Fatalf("N = %d, want 4; got %+v", mr.Dispersion.N, mr)
+	}
+	if mr.DPairVerdict != internal.VerdictOK {
+		t.Fatalf("DPairVerdict = %q, want ok; got %+v", mr.DPairVerdict, mr)
+	}
+	if mr.Dispersion.DPair != 0 {
+		t.Fatalf("DPair = %v, want 0; got %+v", mr.Dispersion.DPair, mr)
+	}
+}
+
+func TestRunMeasureWithGeneratorHighDPairBlocks(t *testing.T) {
+	// Alternating between two structurally disjoint sources (no shared
+	// feature keys) drives mean pairwise similarity toward 0 and D_pair
+	// toward 1 — well over DPairMax, so the gate must block.
+	srcs := []string{testSrcFoo, testSrcBar, testSrcFoo, testSrcBar}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(srcs[call%len(srcs)]))
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 4, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.DPairVerdict != internal.VerdictBlock {
+		t.Fatalf("DPairVerdict = %q, want block; got %+v", mr.DPairVerdict, mr)
+	}
+	if mr.Dispersion.DPair <= testThresholds.DPairMax {
+		t.Fatalf("DPair = %v, want > %v; got %+v", mr.Dispersion.DPair, testThresholds.DPairMax, mr)
+	}
+}
+
+func TestRunMeasureWithGeneratorRetriesThenDiscards(t *testing.T) {
+	const invalidText = "no fenced go block here at all\n"
+
+	// slot 0 (call 0): valid immediately.
+	// slot 1 (calls 1-3): invalid on all 3 attempts -> discarded.
+	// slot 2 (calls 4-6): invalid, invalid, then valid on the 3rd attempt.
+	responses := [][]byte{
+		goBlock(testSrcFoo),
+		[]byte(invalidText), []byte(invalidText), []byte(invalidText),
+		[]byte(invalidText), []byte(invalidText), goBlock(testSrcFoo),
+	}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(responses[call])
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 3, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if gen.calls != len(responses) {
+		t.Fatalf("calls = %d, want %d (no padding back up after a discard)", gen.calls, len(responses))
+	}
+	if mr.Dispersion.Discarded != 1 {
+		t.Fatalf("Discarded = %d, want 1; got %+v", mr.Dispersion.Discarded, mr)
+	}
+	if mr.Dispersion.N != 2 {
+		t.Fatalf("N = %d, want 2; got %+v", mr.Dispersion.N, mr)
+	}
+}
+
+func TestRunMeasureWithGeneratorErrorFailsFast(t *testing.T) {
+	wantErr := errFakeGenerate
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return instrument.Generation{}, wantErr
+	}}
+
+	_, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 5, testThresholds)
+	if err == nil {
+		t.Fatal("runMeasureWithGenerator() error = nil, want non-nil on Generate failure")
+	}
+	if gen.calls != 1 {
+		t.Fatalf("calls = %d, want 1 (must fail fast, no retry on a Generate error)", gen.calls)
+	}
+}
+
+func TestRunMeasureWithGeneratorValidSamplesBelowTwoIsSkipped(t *testing.T) {
+	const invalidText = "no fenced go block here at all\n"
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK([]byte(invalidText))
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 2, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v, want nil (this is a valid, if disappointing, measurement outcome)", err)
+	}
+	if mr.Dispersion.N >= 2 {
+		t.Fatalf("N = %d, want < 2 for this fixture", mr.Dispersion.N)
+	}
+	if mr.DPairVerdict != internal.VerdictSkipped {
+		t.Fatalf("DPairVerdict = %q, want skipped; got %+v", mr.DPairVerdict, mr)
+	}
+}
+
+func TestRunMeasureWithGeneratorDiscardWarnThreshold(t *testing.T) {
+	const invalidText = "no fenced go block here at all\n"
+
+	tests := []struct {
+		name        string
+		discards    int // number of always-invalid slots, out of 5
+		wantDiscard int
+		wantWarn    bool
+	}{
+		{name: "60% discard warns", discards: 3, wantDiscard: 3, wantWarn: true},
+		{name: "20% discard does not warn", discards: 1, wantDiscard: 1, wantWarn: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const samples = 5
+
+			// Build an explicit response table: the first tt.discards slots
+			// consume all 3 retry attempts with invalid text (discarded),
+			// the rest succeed on their first attempt.
+			var responses [][]byte
+			for i := 0; i < samples; i++ {
+				if i < tt.discards {
+					responses = append(responses, []byte(invalidText), []byte(invalidText), []byte(invalidText))
+				} else {
+					responses = append(responses, goBlock(testSrcFoo))
+				}
+			}
+			g := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+				return genOK(responses[call])
+			}}
+
+			mr, err := runMeasureWithGenerator(g, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), samples, testThresholds)
+			if err != nil {
+				t.Fatalf("runMeasureWithGenerator() error = %v", err)
+			}
+			if mr.Dispersion.Discarded != tt.wantDiscard {
+				t.Fatalf("Discarded = %d, want %d; got %+v", mr.Dispersion.Discarded, tt.wantDiscard, mr)
+			}
+			if mr.DiscardWarn != tt.wantWarn {
+				t.Fatalf("DiscardWarn = %v, want %v; got %+v (rate %.2f)", mr.DiscardWarn, tt.wantWarn, mr, mr.DiscardRate)
+			}
+		})
+	}
+}
+
+func TestPrintMeasureResultDiscardWarningVisibility(t *testing.T) {
+	warnMR := measureResult{
+		Dispersion:  internal.DispersionResult{N: 2, Discarded: 8},
+		Config:      internal.InstrumentConfig{Backend: "ollama", Model: "test"},
+		DiscardRate: 0.8,
+		DiscardWarn: true,
+	}
+	out, _ := captureStdout(t, func() int { printMeasureResult(warnMR, testThresholds); return 0 })
+	if !strings.Contains(out, "discard rate") {
+		t.Fatalf("want a discard-rate warning line for DiscardWarn=true, got:\n%s", out)
+	}
+
+	noWarnMR := warnMR
+	noWarnMR.DiscardWarn = false
+	out, _ = captureStdout(t, func() int { printMeasureResult(noWarnMR, testThresholds); return 0 })
+	if strings.Contains(out, "discard rate") {
+		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
+	}
+}
+
+func TestRunMeasureFlagValidation(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "missing --instrument",
+			args: []string{"--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "malformed --instrument (no colon)",
+			args: []string{"--instrument", "ollama", "--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "empty model in --instrument",
+			args: []string{"--instrument", "ollama:", "--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "empty backend in --instrument",
+			args: []string{"--instrument", ":qwen3-coder:30b", "--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "unsupported backend",
+			args: []string{"--instrument", "openai:gpt-4", "--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "samples < 2",
+			args: []string{"--instrument", "ollama:m", "-n", "1", "--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "sim-threshold out of range",
+			args: []string{"--instrument", "ollama:m", "--sim-threshold", "1.5", "--num-ctx", "8192", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "missing --num-ctx",
+			args: []string{"--instrument", "ollama:m", "--num-predict", "2048", specPath},
+		},
+		{
+			name: "missing --num-predict",
+			args: []string{"--instrument", "ollama:m", "--num-ctx", "8192", specPath},
+		},
+		{
+			name: "directory positional argument",
+			args: []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048", subdir},
+		},
+		{
+			name: "wrong number of positional arguments",
+			args: []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errOut, code := captureStderr(t, func() int { return runMeasure(tt.args) })
+			if code != 2 {
+				t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+			}
+			if errOut == "" {
+				t.Fatal("want a non-empty actionable stderr message")
 			}
 		})
 	}

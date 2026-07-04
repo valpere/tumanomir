@@ -40,7 +40,7 @@ bin/tumanomir check docs/requirements.md
 ```
   K_drift:  0.00  [ok]     (threshold 0.20, 0/18 requirements untraced)
   D_const:  0.07  [warn]   (threshold 0.35, 63 markers / 871 prose tokens)
-  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)
+  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)
 ```
 
 ## Usage
@@ -50,13 +50,22 @@ tumanomir check docs/                 # deterministic, instant
 ```
 
 The stochastic `measure` command (`D_pair`, `H_norm`) is specified in
-`docs/requirements.md` §2.2 (REQ-MSR-01..06) but not yet implemented; its
-planned invocation looks like:
+`docs/requirements.md` §2.2 (REQ-MSR-01..06) and requires a running Ollama
+instance:
 
 ```bash
 tumanomir measure docs/spec.md \
-  --instrument ollama:qwen3-coder:30b -n 10  # specified, not yet implemented
+  --instrument ollama:qwen3-coder:30b \
+  -n 10 --temp 1.0 --sim-threshold 0.95 \
+  --num-ctx 8192 --num-predict 2048
 ```
+
+`--instrument` (backend:model), `--num-ctx` and `--num-predict` are
+required — `num-ctx` must have headroom for both the prompt and
+`num-predict`, or the run is rejected before any generation is attempted
+(silent truncation would be a measurement-integrity bug). `-n`/`--samples`
+must be `>= 2` to compute a pairwise similarity. See `tumanomir --help`
+for the full flag list.
 
 Exit codes: `0` gates pass · `1` gate failed · `2` error.
 
@@ -71,8 +80,8 @@ v0.1 in development. See `docs/requirements.md` (written in tumanomir's
 own traceable markup — we eat our own dog food).
 
 - `check` (deterministic layer: `K_drift`, `D_const`) is **implemented**.
-- `measure` (stochastic layer: `D_pair`, `H_norm`) is **specified**
-  (`docs/requirements.md` §2.2, REQ-MSR-01..06) but **not yet implemented**.
+- `measure` (stochastic layer: `D_pair`, `H_norm`) is **implemented**
+  end-to-end against Ollama (`docs/requirements.md` §2.2, REQ-MSR-01..06).
 
 ## Limitations
 

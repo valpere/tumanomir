@@ -54,6 +54,12 @@ type InstrumentConfig struct {
 	NumCtx       int     // context window; must exceed prompt token count
 	NumPredict   int     // max generated tokens; must exceed natural output length
 	SimThreshold float64 // single-linkage clustering threshold for H
+	// Prompt is the exact instrument.PromptV1 (or later version) text sent,
+	// verbatim. It holds the constant's *value* (a plain string), not a
+	// reference to it: internal/types.go (package internal) must not import
+	// internal/instrument (which already imports internal), so runMeasure
+	// is expected to populate this field with instrument.PromptV1.
+	Prompt string
 }
 
 // DispersionResult is the stochastic layer output (D_pair, H) for one spec
