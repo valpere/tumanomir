@@ -74,9 +74,11 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 	cfg := o.Config
 
 	// Conservative, stdlib-only token estimate (no tokenizer in v0.1):
-	// ~3 bytes/token errs toward refusing rather than passing a prompt
-	// that would truncate the output.
-	estimatedPromptTokens := len(prompt) / 3
+	// ~3 bytes/token, rounded up, errs toward refusing rather than passing
+	// a prompt that would truncate the output. Plain len(prompt)/3 would
+	// round down and could underestimate, defeating the "errs toward
+	// refusing" guarantee.
+	estimatedPromptTokens := (len(prompt) + 2) / 3
 	if estimatedPromptTokens+cfg.NumPredict > cfg.NumCtx {
 		return Generation{}, fmt.Errorf(
 			"instrument: estimated prompt tokens (%d, len(prompt)/3 heuristic) + num_predict (%d) exceeds num_ctx (%d); increase num_ctx or reduce num_predict",
@@ -148,7 +150,7 @@ func isUnsupportedThinkError(msg string) bool {
 
 func (o *Ollama) baseURL() string {
 	if o.BaseURL != "" {
-		return o.BaseURL
+		return strings.TrimRight(o.BaseURL, "/")
 	}
 	return defaultBaseURL
 }
