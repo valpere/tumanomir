@@ -48,6 +48,12 @@ var (
 // are intentionally not matched: this mirrors gen.sh's exact behavior, not
 // a broader Markdown fence parser.
 func ExtractGoBlock(text []byte) ([]byte, bool) {
+	// Normalize CRLF to LF first: a model or proxy that emits \r\n would
+	// otherwise leave every line with a trailing \r, so the exact-match
+	// fence comparisons below would never succeed — every generation
+	// would look like "no code block found" and inflate the discard rate,
+	// masking a formatting artifact as measurement noise.
+	text = bytes.ReplaceAll(text, []byte("\r\n"), []byte("\n"))
 	lines := bytes.Split(text, []byte("\n"))
 
 	open := -1

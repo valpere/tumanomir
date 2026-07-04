@@ -58,6 +58,12 @@ func TestExtractGoBlock(t *testing.T) {
 			want:   "",
 			wantOK: true,
 		},
+		{
+			name:   "CRLF line endings are normalized before fence matching",
+			text:   "some text\r\n```go\r\npackage main\r\n\r\nfunc main() {}\r\n```\r\ntrailing\r\n",
+			want:   "package main\n\nfunc main() {}",
+			wantOK: true,
+		},
 	}
 
 	for _, tt := range tests {
