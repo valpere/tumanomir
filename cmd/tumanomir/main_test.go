@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -490,6 +491,181 @@ func TestPrintMeasureResultDiscardWarningVisibility(t *testing.T) {
 	out, _ = captureStdout(t, func() int { printMeasureResult(noWarnMR, testThresholds); return 0 })
 	if strings.Contains(out, "discard rate") {
 		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
+	}
+}
+
+// TestPrintMeasureResultOKVerdict covers the normal (non-skipped) output
+// path with a passing D_pair verdict, asserting both the REQ-MSR-04
+// instrument-config block and the D_pair/H/H_norm lines render with the
+// exact format strings printMeasureResult uses.
+func TestPrintMeasureResultOKVerdict(t *testing.T) {
+	mr := measureResult{
+		Dispersion: internal.DispersionResult{
+			Instrument: "ollama:qwen3-coder:30b",
+			N:          5,
+			Discarded:  1,
+			MeanSim:    0.82,
+			DPair:      0.18,
+			Clusters:   2,
+			SimThresh:  0.95,
+			H:          1.37,
+			HNorm:      0.59,
+		},
+		Config: internal.InstrumentConfig{
+			Backend:      "ollama",
+			Model:        "qwen3-coder:30b",
+			Temperature:  1.0,
+			Samples:      5,
+			Think:        false,
+			NumCtx:       8192,
+			NumPredict:   2048,
+			SimThreshold: 0.95,
+			Prompt:       "abcde",
+		},
+		DPairVerdict: internal.VerdictOK,
+		DiscardRate:  1.0 / 6.0,
+		DiscardWarn:  false,
+	}
+
+	out, _ := captureStdout(t, func() int { printMeasureResult(mr, testThresholds); return 0 })
+
+	if strings.Contains(out, "discard rate") {
+		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
+	}
+
+	wantConfigLines := []string{
+		"Instrument config (REQ-MSR-04):",
+		"  backend:        ollama",
+		"  model:          qwen3-coder:30b",
+		"  temperature:    1.00",
+		"  samples (N):    5",
+		"  think:          false",
+		"  num_ctx:        8192",
+		"  num_predict:    2048",
+		"  sim_threshold:  0.95",
+		"  prompt:         PromptV1 (5 bytes)",
+	}
+	for _, line := range wantConfigLines {
+		if !strings.Contains(out, line) {
+			t.Fatalf("want instrument-config line %q in output, got:\n%s", line, out)
+		}
+	}
+
+	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
+		mr.Dispersion.DPair, internal.VerdictOK, pad(internal.VerdictOK), testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
+	if !strings.Contains(out, wantDPair) {
+		t.Fatalf("want D_pair line %q, got output:\n%s", wantDPair, out)
+	}
+	if !strings.Contains(out, "[ok]") {
+		t.Fatalf("want [ok] verdict label, got:\n%s", out)
+	}
+
+	wantH := fmt.Sprintf("  H:        %.2f  bits (ordinal signal only, not gated)", mr.Dispersion.H)
+	wantHNorm := fmt.Sprintf("  H_norm:   %.2f  (ordinal signal only, not gated)", mr.Dispersion.HNorm)
+	if !strings.Contains(out, wantH) {
+		t.Fatalf("want H line %q, got output:\n%s", wantH, out)
+	}
+	if !strings.Contains(out, wantHNorm) {
+		t.Fatalf("want H_norm line %q, got output:\n%s", wantHNorm, out)
+	}
+}
+
+// TestPrintMeasureResultBlockVerdict mirrors the OK case but with a D_pair
+// value over threshold, asserting the [block] label and correct values.
+func TestPrintMeasureResultBlockVerdict(t *testing.T) {
+	mr := measureResult{
+		Dispersion: internal.DispersionResult{
+			Instrument: "ollama:qwen3-coder:30b",
+			N:          4,
+			Discarded:  0,
+			MeanSim:    0.55,
+			DPair:      0.45,
+			Clusters:   4,
+			SimThresh:  0.95,
+			H:          2.0,
+			HNorm:      1.0,
+		},
+		Config: internal.InstrumentConfig{
+			Backend:      "ollama",
+			Model:        "qwen3-coder:30b",
+			Temperature:  1.0,
+			Samples:      4,
+			Think:        true,
+			NumCtx:       8192,
+			NumPredict:   2048,
+			SimThreshold: 0.95,
+			Prompt:       "abcde",
+		},
+		DPairVerdict: internal.VerdictBlock,
+		DiscardRate:  0,
+		DiscardWarn:  false,
+	}
+
+	out, _ := captureStdout(t, func() int { printMeasureResult(mr, testThresholds); return 0 })
+
+	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
+		mr.Dispersion.DPair, internal.VerdictBlock, pad(internal.VerdictBlock), testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
+	if !strings.Contains(out, wantDPair) {
+		t.Fatalf("want D_pair line %q, got output:\n%s", wantDPair, out)
+	}
+	if !strings.Contains(out, "[block]") {
+		t.Fatalf("want [block] verdict label, got:\n%s", out)
+	}
+
+	wantH := fmt.Sprintf("  H:        %.2f  bits (ordinal signal only, not gated)", mr.Dispersion.H)
+	wantHNorm := fmt.Sprintf("  H_norm:   %.2f  (ordinal signal only, not gated)", mr.Dispersion.HNorm)
+	if !strings.Contains(out, wantH) {
+		t.Fatalf("want H line %q, got output:\n%s", wantH, out)
+	}
+	if !strings.Contains(out, wantHNorm) {
+		t.Fatalf("want H_norm line %q, got output:\n%s", wantHNorm, out)
+	}
+}
+
+// TestPrintMeasureResultSkippedVerdict covers the early-return branch for
+// fewer than 2 valid samples: D_pair, H and H_norm must all render as the
+// "—  [skipped]" form, never as a misleading numeric "D_pair: 0.00".
+func TestPrintMeasureResultSkippedVerdict(t *testing.T) {
+	mr := measureResult{
+		Dispersion: internal.DispersionResult{
+			Instrument: "ollama:qwen3-coder:30b",
+			N:          1,
+			Discarded:  4,
+		},
+		Config: internal.InstrumentConfig{
+			Backend:      "ollama",
+			Model:        "qwen3-coder:30b",
+			Temperature:  1.0,
+			Samples:      5,
+			Think:        false,
+			NumCtx:       8192,
+			NumPredict:   2048,
+			SimThreshold: 0.95,
+			Prompt:       "abcde",
+		},
+		DPairVerdict: internal.VerdictSkipped,
+		DiscardRate:  0.8,
+		DiscardWarn:  false,
+	}
+
+	out, _ := captureStdout(t, func() int { printMeasureResult(mr, testThresholds); return 0 })
+
+	wantDPair := fmt.Sprintf("  D_pair:   —     [%s]%s(only %d valid sample(s); need >=2 to compute pairwise similarity)",
+		internal.VerdictSkipped, pad(internal.VerdictSkipped), mr.Dispersion.N)
+	wantH := fmt.Sprintf("  H:        —     [%s]%s(ordinal signal only, not gated)", internal.VerdictSkipped, pad(internal.VerdictSkipped))
+	wantHNorm := fmt.Sprintf("  H_norm:   —     [%s]%s(ordinal signal only, not gated)", internal.VerdictSkipped, pad(internal.VerdictSkipped))
+
+	if !strings.Contains(out, wantDPair) {
+		t.Fatalf("want skipped D_pair line %q, got output:\n%s", wantDPair, out)
+	}
+	if !strings.Contains(out, wantH) {
+		t.Fatalf("want skipped H line %q, got output:\n%s", wantH, out)
+	}
+	if !strings.Contains(out, wantHNorm) {
+		t.Fatalf("want skipped H_norm line %q, got output:\n%s", wantHNorm, out)
+	}
+	if strings.Contains(out, "D_pair:   0.00") {
+		t.Fatalf("skipped verdict must not render a numeric D_pair value, got:\n%s", out)
 	}
 }
 
