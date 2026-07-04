@@ -25,12 +25,14 @@ Productization of the methodology from the article "Source of the Unknown".
    precision of — not as a source of truth. The apparent contradiction is
    illusory: the first statement is about development discipline, the
    second is about the subject of measurement.
-2. `docs/investigation/history.md` — the project's provenance: where the
-   methodology came from, which decisions were already made and why.
-   `docs/investigation/design.md` — the v0.1 design. Everything a reviewer
-   or external agent needs lives in the repository
-   (`/home/val/wrk/projects/tumanomir/tumanomir`) — `../context/` is no
-   longer referenced; the review surface is limited to the repo.
+2. `docs/architecture.md` — the current architecture (metrics, CLI UX,
+   package layout, methodological invariants). `docs/roadmap.md` — what's
+   not built yet, ordered by horizon; tactical debt lives in GitHub issues,
+   not there. `docs/investigation/history.md` — the project's provenance:
+   where the methodology came from, which decisions were already made and
+   why. Everything a reviewer or external agent needs lives in the
+   repository (`/home/val/wrk/projects/tumanomir/tumanomir`) — `../context/`
+   is no longer referenced; the review surface is limited to the repo.
 3. Current code state — a spike of the deterministic core plus a port of
    the dispersion experiment; check it against requirements — a mismatch
    is a bug, either in the code or in the requirements (update requirements
