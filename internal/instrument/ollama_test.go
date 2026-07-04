@@ -107,6 +107,32 @@ func TestOllamaGenerateParsesResponse(t *testing.T) {
 	if got.PromptEvalCount != 450 || got.EvalCount != 890 {
 		t.Fatalf("want PromptEvalCount=450 EvalCount=890, got %+v", got)
 	}
+	if got.DoneReason != "stop" {
+		t.Fatalf("want DoneReason=%q, got %+v", "stop", got)
+	}
+}
+
+// TestOllamaGenerateParsesTruncatedDoneReason verifies that done_reason
+// "length" (Ollama's direct truncation signal, REQ-MSR-06) survives onto
+// Generation.DoneReason unmodified, distinct from the "stop" case above.
+func TestOllamaGenerateParsesTruncatedDoneReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(chatResponse{
+			Message:    chatMessage{Role: "assistant", Content: "package main\n\nfunc main() {"},
+			Done:       true,
+			DoneReason: "length",
+		})
+	}))
+	defer srv.Close()
+
+	o := &Ollama{BaseURL: srv.URL, Config: baseConfig()}
+	got, err := o.Generate(context.Background(), "generate a Go file")
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if got.DoneReason != "length" {
+		t.Fatalf("want DoneReason=%q, got %+v", "length", got)
+	}
 }
 
 func TestOllamaGeneratePreflightRejectsWithoutHTTPCall(t *testing.T) {

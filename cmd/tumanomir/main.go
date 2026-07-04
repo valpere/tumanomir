@@ -195,6 +195,7 @@ type measureResult struct {
 	DPairVerdict internal.Verdict
 	DiscardRate  float64 // Discarded / (Discarded + N), 0 if no attempts made
 	DiscardWarn  bool    // DiscardRate > 0.40 (REQ-MSR-05's hypothesis threshold)
+	Truncated    int     // count of accepted (valid) generations with DoneReason == "length" (REQ-MSR-06)
 }
 
 // runMeasure parses flags, validates the positional spec-file argument,
@@ -332,6 +333,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 
 	var sources [][]byte
 	discarded := 0
+	truncated := 0
 	for slot := 0; slot < samples; slot++ {
 		valid := false
 		for attempt := 0; attempt < maxAttemptsPerSample; attempt++ {
@@ -343,6 +345,15 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 			if ok && dispersion.ValidGo(block) {
 				sources = append(sources, block)
 				valid = true
+				// A truncated generation can still parse as valid Go (e.g. a
+				// complete top-level decl before the cut) and pass ValidGo —
+				// that's exactly the measurement-integrity gap REQ-MSR-06's
+				// done_reason signal closes: accept the sample (it IS valid
+				// Go), but flag it so the report can warn that its AST may
+				// not reflect the model's full intended output.
+				if g.DoneReason == "length" {
+					truncated++
+				}
 				break
 			}
 			// invalid: retry while attempts remain for this slot
@@ -380,19 +391,34 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 		DPairVerdict: dPairVerdict,
 		DiscardRate:  discardRate,
 		DiscardWarn:  discardRate > discardWarnThreshold,
+		Truncated:    truncated,
 	}, nil
 }
 
 // printMeasureResult renders REQ-MSR-04's instrument config, the
-// discard-rate warning (if triggered), and the D_pair/H/H_norm lines.
-// H and H_norm are always printed as ordinal/advisory signals — they
-// never gate, per the methodological invariant in CLAUDE.md.
+// discard-rate and truncation warnings (if triggered), and the
+// D_pair/H/H_norm lines. H and H_norm are always printed as
+// ordinal/advisory signals — they never gate, per the methodological
+// invariant in CLAUDE.md.
+//
+// The discard-rate warning (REQ-MSR-05) and the truncation warning
+// (REQ-MSR-06) are printed as two separate lines rather than folded
+// together: they flag two distinct failure modes — generations that never
+// became valid Go at all (discarded, excluded from N) vs. generations that
+// parsed as valid Go but were cut off by num_predict (accepted into N, but
+// their AST may not reflect the model's full intended output). Merging the
+// two would blur which failure mode a reader needs to act on.
 func printMeasureResult(mr measureResult, th internal.Thresholds) {
 	cfg := mr.Config
 
 	if mr.DiscardWarn {
 		fmt.Printf("⚠ discard rate: %.0f%% (%d/%d generations invalid) — exceeds the %.0f%% hypothesis threshold (REQ-MSR-05); results may be unreliable\n\n",
 			mr.DiscardRate*100, mr.Dispersion.Discarded, mr.Dispersion.Discarded+mr.Dispersion.N, discardWarnThreshold*100)
+	}
+
+	if mr.Truncated > 0 {
+		fmt.Printf("⚠ %d/%d accepted generations had done_reason=length (truncated by num_predict) — their AST may not reflect the model's full intended output; consider raising --num-predict\n\n",
+			mr.Truncated, mr.Dispersion.N)
 	}
 
 	fmt.Println("Instrument config (REQ-MSR-04):")

@@ -149,6 +149,7 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 		Text:            []byte(chatResp.Message.Content),
 		PromptEvalCount: chatResp.PromptEvalCount,
 		EvalCount:       chatResp.EvalCount,
+		DoneReason:      chatResp.DoneReason,
 	}, nil
 }
 
