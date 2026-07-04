@@ -39,6 +39,23 @@ type DConstResult struct {
 	Value             float64 // markers / (markers + prose)
 }
 
+// InstrumentConfig is the full stochastic-layer instrument configuration.
+// Measurements are instrument-relative and meaningless without it, so the
+// configuration must be fixed per run and printed in the report (REQ-MSR-04).
+// See docs/requirements.md @schema InstrumentConfig for field defaults and
+// constraints; no Default constructor is provided here because SimThreshold
+// has no calibrated default wired into code yet — callers must supply one.
+type InstrumentConfig struct {
+	Backend      string  // e.g. "ollama"
+	Model        string  // e.g. "qwen3-coder:30b"
+	Temperature  float64 // sampling temperature
+	Samples      int     // N generations requested per spec
+	Think        bool    // reasoning-model think mode (REQ-MSR-06)
+	NumCtx       int     // context window; must exceed prompt token count
+	NumPredict   int     // max generated tokens; must exceed natural output length
+	SimThreshold float64 // single-linkage clustering threshold for H
+}
+
 // DispersionResult is the stochastic layer output (D_pair, H) for one spec
 // under one fixed instrument configuration.
 type DispersionResult struct {
