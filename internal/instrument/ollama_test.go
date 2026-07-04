@@ -3,6 +3,8 @@ package instrument
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -191,6 +193,17 @@ func TestOllamaGenerateTimesOut(t *testing.T) {
 	_, err := o.Generate(t.Context(), "generate a Go file")
 	if err == nil {
 		t.Fatal("want timeout error, got nil")
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("want a net.Error with Timeout()==true (client-side deadline), got %v", err)
+	}
+}
+
+func TestOllamaTimeoutZeroFallsBackToDefault(t *testing.T) {
+	o := &Ollama{Config: baseConfig()}
+	if got := o.timeout(); got != defaultTimeout {
+		t.Fatalf("timeout() with zero-value Timeout = %v, want defaultTimeout (%v)", got, defaultTimeout)
 	}
 }
 
