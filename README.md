@@ -41,3 +41,7 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 
 v0.1 in development. See `docs/requirements.md` (written in tumanomir's
 own traceable markup — we eat our own dog food).
+
+## License
+
+[Apache License 2.0](LICENSE).
