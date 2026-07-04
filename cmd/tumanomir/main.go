@@ -4,11 +4,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/valpere/tumanomir/internal"
+	"github.com/valpere/tumanomir/internal/dispersion"
+	"github.com/valpere/tumanomir/internal/instrument"
 	"github.com/valpere/tumanomir/internal/metrics"
 	"github.com/valpere/tumanomir/internal/spec"
 )
@@ -19,12 +23,21 @@ const usage = `tumanomir — specification-precision measurement for AI projects
 
 Usage:
   tumanomir check [flags] <file.md|dir>   deterministic layer: K_drift, D_const
-  tumanomir measure                       not yet implemented — v0.1 roadmap
+  tumanomir measure [flags] <file.md>     stochastic layer: D_pair, H_norm
   tumanomir version
 
 Flags for check:
   --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
   --d-const-min  float   warn: min lexical constraint density (default 0.35)
+
+Flags for measure:
+  --instrument     string  required, format backend:model (e.g. ollama:qwen3-coder:30b)
+  -n, --samples    int     number of generations to sample, must be >=2 (default 10)
+  --temp           float   sampling temperature (default 1.0)
+  --sim-threshold  float   single-linkage clustering threshold, in [0,1] (default 0.95)
+  --num-ctx        int     required: context window; must exceed the prompt token count
+  --num-predict    int     required: max generated tokens; must exceed natural output length
+  --think          bool    enable reasoning-model think mode (default false)
 
 Default thresholds are uncalibrated hypotheses from the methodology
 article; tune them on your own spec corpus.
@@ -41,6 +54,8 @@ func main() {
 	switch os.Args[1] {
 	case "check":
 		os.Exit(runCheck(os.Args[2:]))
+	case "measure":
+		os.Exit(runMeasure(os.Args[2:]))
 	case "version":
 		fmt.Println("tumanomir", version)
 	case "-h", "--help", "help":
@@ -79,7 +94,7 @@ func runCheck(args []string) int {
 	}
 	fmt.Printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
 		cr.DC.Value, cr.DCVerdict, pad(cr.DCVerdict), th.DConstMin, cr.DC.ConstraintMarkers, cr.DC.ProseTokens)
-	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument; not yet implemented — v0.1 roadmap)\n")
+	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)\n")
 
 	for _, id := range cr.KD.HangingIDs {
 		fmt.Printf("    hanging: %s\n", id)
@@ -158,4 +173,249 @@ func pad(v internal.Verdict) string {
 	default:
 		return "  "
 	}
+}
+
+// discardWarnThreshold is REQ-MSR-05's hypothesis discard-rate threshold
+// above which the measure report must flag the run as potentially
+// unreliable. Stated here as a hypothesis, not a calibrated constant, the
+// same treatment given to the 0.20/0.35/0.30 thresholds in
+// internal.DefaultThresholds.
+const discardWarnThreshold = 0.40
+
+// maxAttemptsPerSample is 1 initial attempt + 2 retries, per REQ-MSR-05.
+const maxAttemptsPerSample = 3
+
+// measureResult holds the stochastic layer's aggregated metric values,
+// discard-rate warning state, and gate verdict.
+//
+// TODO(REQ-OUT-01): move to internal/report once that package exists
+type measureResult struct {
+	Dispersion   internal.DispersionResult
+	Config       internal.InstrumentConfig
+	DPairVerdict internal.Verdict
+	DiscardRate  float64 // Discarded / (Discarded + N), 0 if no attempts made
+	DiscardWarn  bool    // DiscardRate > 0.40 (REQ-MSR-05's hypothesis threshold)
+}
+
+// runMeasure parses flags, validates the positional spec-file argument,
+// constructs the real Ollama generator and delegates to
+// runMeasureWithGenerator for the testable retry/discard/analyze logic,
+// then prints the report.
+func runMeasure(args []string) int {
+	fs := flag.NewFlagSet("measure", flag.ExitOnError)
+
+	var (
+		instrumentFlag string
+		samples        int
+		temp           float64
+		simThreshold   float64
+		numCtx         int
+		numPredict     int
+		think          bool
+	)
+	fs.StringVar(&instrumentFlag, "instrument", "", "required, format backend:model (e.g. ollama:qwen3-coder:30b)")
+	fs.IntVar(&samples, "n", 10, "number of generations to sample, must be >=2")
+	fs.IntVar(&samples, "samples", 10, "alias for -n")
+	fs.Float64Var(&temp, "temp", 1.0, "sampling temperature")
+	fs.Float64Var(&simThreshold, "sim-threshold", 0.95, "single-linkage clustering threshold, in [0,1]")
+	fs.IntVar(&numCtx, "num-ctx", 0, "required: context window; must exceed the prompt token count")
+	fs.IntVar(&numPredict, "num-predict", 0, "required: max generated tokens; must exceed natural output length")
+	fs.BoolVar(&think, "think", false, "enable reasoning-model think mode")
+	_ = fs.Parse(args)
+
+	if instrumentFlag == "" {
+		fmt.Fprintln(os.Stderr, "measure: --instrument is required, format backend:model (e.g. ollama:qwen3-coder:30b)")
+		return 2
+	}
+	// Split on the first ':' only — model names may themselves contain ':'
+	// (e.g. qwen3-coder:30b).
+	colon := strings.Index(instrumentFlag, ":")
+	if colon < 0 {
+		fmt.Fprintln(os.Stderr, "measure: --instrument must be in backend:model format (e.g. ollama:qwen3-coder:30b)")
+		return 2
+	}
+	backend, model := instrumentFlag[:colon], instrumentFlag[colon+1:]
+	if backend == "" || model == "" {
+		fmt.Fprintln(os.Stderr, "measure: --instrument backend and model must both be non-empty (format backend:model)")
+		return 2
+	}
+	if backend != "ollama" {
+		fmt.Fprintf(os.Stderr, "measure: unsupported backend %q; v0.1 supports only \"ollama\"\n", backend)
+		return 2
+	}
+
+	if samples < 2 {
+		fmt.Fprintln(os.Stderr, "measure: --samples (-n) must be >= 2 to compute pairwise similarity")
+		return 2
+	}
+	if simThreshold < 0 || simThreshold > 1 {
+		fmt.Fprintln(os.Stderr, "measure: --sim-threshold must be within [0,1]")
+		return 2
+	}
+	if numCtx <= 0 {
+		fmt.Fprintln(os.Stderr, "measure: --num-ctx is required (must exceed the prompt token count)")
+		return 2
+	}
+	if numPredict <= 0 {
+		fmt.Fprintln(os.Stderr, "measure: --num-predict is required (must exceed the natural output length)")
+		return 2
+	}
+
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "measure: exactly one <file.md> argument required")
+		return 2
+	}
+	path := fs.Arg(0)
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "measure:", err)
+		return 2
+	}
+	if info.IsDir() {
+		fmt.Fprintf(os.Stderr, "measure: %s is a directory; measure takes a single spec file (directory aggregation is not methodologically meaningful for dispersion measurement in v0.1)\n", path)
+		return 2
+	}
+	specContent, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "measure:", err)
+		return 2
+	}
+
+	cfg := internal.InstrumentConfig{
+		Backend:      backend,
+		Model:        model,
+		Temperature:  temp,
+		Samples:      samples,
+		Think:        think,
+		NumCtx:       numCtx,
+		NumPredict:   numPredict,
+		SimThreshold: simThreshold,
+		Prompt:       instrument.PromptV1,
+	}
+
+	// v0.1 ships only "ollama"; already validated above. Future backends
+	// would switch on cfg.Backend here.
+	gen := instrument.NewOllama(cfg)
+
+	th := internal.DefaultThresholds()
+	mr, err := runMeasureWithGenerator(gen, cfg, specContent, samples, th)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "measure:", err)
+		return 2
+	}
+
+	printMeasureResult(mr, th)
+
+	if mr.DPairVerdict == internal.VerdictBlock {
+		fmt.Println("\nexit code: 1 (gate failed)")
+		return 1
+	}
+	return 0
+}
+
+// runMeasureWithGenerator runs the retry/discard generation loop against
+// gen, then hands the surviving valid sources to dispersion.Analyze and
+// computes the D_pair gate verdict. It is the pure-logic, testable
+// counterpart to runMeasure (which does flag parsing, file I/O and
+// printing), mirroring the aggregate/runCheck split.
+//
+// Error-signaling contract: a non-nil error means gen.Generate itself
+// failed (network/HTTP/preflight failure) — a hard failure of the whole
+// run, never a per-sample retry case, since a broken instrument would
+// otherwise produce a misleading discard rate that looks like model
+// non-determinism. The caller (runMeasure) is expected to print the error
+// and exit 2. A nil error always comes with a fully populated
+// measureResult, even when valid samples < 2 (handled via DPairVerdict ==
+// internal.VerdictSkipped, not as an error).
+func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentConfig, specContent []byte, samples int, th internal.Thresholds) (measureResult, error) {
+	prompt := instrument.BuildPrompt(specContent)
+
+	var sources [][]byte
+	discarded := 0
+	for slot := 0; slot < samples; slot++ {
+		valid := false
+		for attempt := 0; attempt < maxAttemptsPerSample; attempt++ {
+			g, err := gen.Generate(context.Background(), prompt)
+			if err != nil {
+				return measureResult{}, fmt.Errorf("generation failed: %w", err)
+			}
+			block, ok := instrument.ExtractGoBlock(g.Text)
+			if ok && dispersion.ValidGo(block) {
+				sources = append(sources, block)
+				valid = true
+				break
+			}
+			// invalid: retry while attempts remain for this slot
+		}
+		if !valid {
+			// 3rd attempt still invalid: discard this slot and move on —
+			// never pad the sample count back up with extra slots.
+			discarded++
+		}
+	}
+
+	result := dispersion.Analyze(sources, cfg.SimThreshold)
+	result.Instrument = fmt.Sprintf("%s:%s", cfg.Backend, cfg.Model)
+	result.Discarded = discarded
+
+	dPairVerdict := internal.VerdictOK
+	switch {
+	case result.N < 2:
+		// Too many discards left fewer than 2 valid samples to compare —
+		// a distinct skipped state, never a misleading "D_pair: 0.00".
+		dPairVerdict = internal.VerdictSkipped
+	case result.DPair > th.DPairMax:
+		dPairVerdict = internal.VerdictBlock
+	}
+
+	total := discarded + result.N
+	discardRate := 0.0
+	if total > 0 {
+		discardRate = float64(discarded) / float64(total)
+	}
+
+	return measureResult{
+		Dispersion:   result,
+		Config:       cfg,
+		DPairVerdict: dPairVerdict,
+		DiscardRate:  discardRate,
+		DiscardWarn:  discardRate > discardWarnThreshold,
+	}, nil
+}
+
+// printMeasureResult renders REQ-MSR-04's instrument config, the
+// discard-rate warning (if triggered), and the D_pair/H/H_norm lines.
+// H and H_norm are always printed as ordinal/advisory signals — they
+// never gate, per the methodological invariant in CLAUDE.md.
+func printMeasureResult(mr measureResult, th internal.Thresholds) {
+	cfg := mr.Config
+
+	if mr.DiscardWarn {
+		fmt.Printf("⚠ discard rate: %.0f%% (%d/%d generations invalid) — exceeds the %.0f%% hypothesis threshold (REQ-MSR-05); results may be unreliable\n\n",
+			mr.DiscardRate*100, mr.Dispersion.Discarded, mr.Dispersion.Discarded+mr.Dispersion.N, discardWarnThreshold*100)
+	}
+
+	fmt.Println("Instrument config (REQ-MSR-04):")
+	fmt.Printf("  backend:        %s\n", cfg.Backend)
+	fmt.Printf("  model:          %s\n", cfg.Model)
+	fmt.Printf("  temperature:    %.2f\n", cfg.Temperature)
+	fmt.Printf("  samples (N):    %d\n", cfg.Samples)
+	fmt.Printf("  think:          %t\n", cfg.Think)
+	fmt.Printf("  num_ctx:        %d\n", cfg.NumCtx)
+	fmt.Printf("  num_predict:    %d\n", cfg.NumPredict)
+	fmt.Printf("  sim_threshold:  %.2f\n", cfg.SimThreshold)
+	fmt.Printf("  prompt:         PromptV1 (%d bytes)\n\n", len(cfg.Prompt))
+
+	if mr.DPairVerdict == internal.VerdictSkipped {
+		fmt.Printf("  D_pair:   —     [%s]%s(only %d valid sample(s); need >=2 to compute pairwise similarity)\n",
+			internal.VerdictSkipped, pad(internal.VerdictSkipped), mr.Dispersion.N)
+		fmt.Printf("  H:        —     [%s]%s(ordinal signal only, not gated)\n", internal.VerdictSkipped, pad(internal.VerdictSkipped))
+		fmt.Printf("  H_norm:   —     [%s]%s(ordinal signal only, not gated)\n", internal.VerdictSkipped, pad(internal.VerdictSkipped))
+		return
+	}
+
+	fmt.Printf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)\n",
+		mr.Dispersion.DPair, mr.DPairVerdict, pad(mr.DPairVerdict), th.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
+	fmt.Printf("  H:        %.2f  bits (ordinal signal only, not gated)\n", mr.Dispersion.H)
+	fmt.Printf("  H_norm:   %.2f  (ordinal signal only, not gated)\n", mr.Dispersion.HNorm)
 }

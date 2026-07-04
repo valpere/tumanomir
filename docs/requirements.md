@@ -26,7 +26,8 @@ own specification (dogfooding).
   think: Bool @constraint(default: false),
   num_ctx: Int @constraint(rule: "must exceed prompt token count"),
   num_predict: Int @constraint(rule: "must exceed natural output length"),
-  sim_threshold: Float @constraint(default: 0.95, range: [0,1], rule: "no default currently wired in code — SimThreshold is a caller-supplied parameter to dispersion.Analyze; 0.95 is a proposed hypothesis default matching the article's experiment, not a calibrated constant")
+  sim_threshold: Float @constraint(default: 0.95, range: [0,1], rule: "no default currently wired in code — SimThreshold is a caller-supplied parameter to dispersion.Analyze; 0.95 is a proposed hypothesis default matching the article's experiment, not a calibrated constant"),
+  prompt: String @constraint(rule: "named, versioned package-level constant, not an inline literal — instrument-relative config, must be reproducible from the report")
 }
 
 @schema Report {
@@ -111,9 +112,11 @@ own specification (dogfooding).
    -> [FUN-MSR-03] instrument.Generator interface; instrument.Ollama
 
 10. [REQ-MSR-04] The full instrument configuration (backend, model,
-    temperature, N, think mode, num_ctx, num_predict, sim threshold)
-    must be fixed per run and printed in the report — measurements are
-    instrument-relative and meaningless without it.
+    temperature, N, think mode, num_ctx, num_predict, sim threshold,
+    prompt) must be fixed per run and printed in the report —
+    measurements are instrument-relative and meaningless without it. The
+    prompt is a versioned, named constant (not an inline literal) so a
+    reader can reproduce the measurement from the report alone.
     -> [FUN-MSR-04] InstrumentConfig serialized into Report header
 
 11. [REQ-MSR-05] Generations that fail Go parsing must be retried up to a
