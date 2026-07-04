@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -212,5 +213,77 @@ func TestOllamaHTTPClientNotOverriddenWhenCallerSupplied(t *testing.T) {
 	o := &Ollama{HTTPClient: callerClient, Timeout: 50 * time.Millisecond, Config: baseConfig()}
 	if got := o.httpClient(); got != callerClient {
 		t.Fatalf("want httpClient() to return the caller-supplied client unmodified, got %+v", got)
+	}
+}
+
+// TestOllamaGenerateContextCancellation verifies that Generate aborts
+// promptly on a cancelled context rather than waiting for the full
+// round-trip, and that the resulting error chain still exposes
+// context.Canceled through Generate's fmt.Errorf("...: %w", err) wrapping
+// (Go's http.Client wraps context.Canceled in a *url.Error, and errors.Is
+// unwraps through it via *url.Error's Unwrap method).
+//
+// A fix-review pass (kimi-k2.6:cloud) suggested replacing the fixed
+// time.Sleep + elapsed-time assertion below with a handler that blocks on
+// <-r.Context().Done(), reasoning it would remove the wall-clock race
+// entirely. Tried it: it hangs. The server's request context does not get
+// cancelled promptly (if ever, in this httptest setup) just because the
+// *client's* context was cancelled and http.Client aborted the round trip
+// — httptest.Server.Close() then blocks forever waiting for the handler to
+// return, timing out the whole test binary. Reverted; kept as time.Sleep
+// with generous margins instead (tech-lead-verified: cancel at 30ms,
+// assertion ceiling 300ms, server responds at 500ms — 270ms slack above
+// the cancel point, 200ms below the server delay).
+func TestOllamaGenerateContextCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(chatResponse{
+			Message: chatMessage{Role: "assistant", Content: "package main"},
+			Done:    true,
+		})
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(30*time.Millisecond, cancel)
+
+	o := &Ollama{BaseURL: srv.URL, Config: baseConfig()}
+	start := time.Now()
+	_, err := o.Generate(ctx, "generate a Go file")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("want error from cancelled context, got nil")
+	}
+	if elapsed >= 300*time.Millisecond {
+		t.Fatalf("Generate did not return promptly after cancellation (took %v, server sleeps 500ms)", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want error chain to include context.Canceled, got: %v", err)
+	}
+}
+
+// TestOllamaGenerateMalformedResponseBody verifies that a non-JSON response
+// body (e.g. an HTML error page from a reverse proxy sitting in front of
+// Ollama) produces a decode error that includes the HTTP status code, per
+// Generate's fmt.Errorf("instrument: decode ollama response (status %d): %w", ...).
+func TestOllamaGenerateMalformedResponseBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html><body>Bad Gateway</body></html>"))
+	}))
+	defer srv.Close()
+
+	o := &Ollama{BaseURL: srv.URL, Config: baseConfig()}
+	_, err := o.Generate(context.Background(), "generate a Go file")
+	if err == nil {
+		t.Fatal("want error decoding a non-JSON response body, got nil")
+	}
+	if !strings.Contains(err.Error(), "decode ollama response") {
+		t.Fatalf("want decode-error wording, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("status %d", http.StatusOK)) {
+		t.Fatalf("want HTTP status code %d in error, got: %v", http.StatusOK, err)
 	}
 }
