@@ -12,6 +12,12 @@ import "bytes"
 // one, or historical reports become unreproducible.
 const PromptV1 = "You convert software specifications into Go type definitions. Output ONLY one ```go code block containing: package declaration, type definitions (structs, named types, consts) and function signatures with empty bodies {}. No explanations, no comments, no implementation logic."
 
+// PromptVersion identifies PromptV1 for reporting (REQ-MSR-04): the
+// measure report prints this instead of a hardcoded literal, so bumping
+// to a future PromptV2 constant and updating this identifier together
+// keeps the report from claiming a stale prompt version.
+const PromptVersion = "PromptV1"
+
 // BuildPrompt concatenates PromptV1 with the spec content into the single
 // user-role message sent to the instrument. This is a v0.1 simplification:
 // the reference experiment (gen.sh) used a system+user message split, but

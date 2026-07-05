@@ -292,15 +292,16 @@ func runMeasure(args []string) int {
 	}
 
 	cfg := internal.InstrumentConfig{
-		Backend:      backend,
-		Model:        model,
-		Temperature:  temp,
-		Samples:      samples,
-		Think:        think,
-		NumCtx:       numCtx,
-		NumPredict:   numPredict,
-		SimThreshold: simThreshold,
-		Prompt:       instrument.PromptV1,
+		Backend:       backend,
+		Model:         model,
+		Temperature:   temp,
+		Samples:       samples,
+		Think:         think,
+		NumCtx:        numCtx,
+		NumPredict:    numPredict,
+		SimThreshold:  simThreshold,
+		Prompt:        instrument.PromptV1,
+		PromptVersion: instrument.PromptVersion,
 	}
 
 	// v0.1 ships only "ollama"; already validated above. Future backends
@@ -374,7 +375,6 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 	}
 
 	result := dispersion.Analyze(sources, cfg.SimThreshold)
-	result.Instrument = fmt.Sprintf("%s:%s", cfg.Backend, cfg.Model)
 	result.Discarded = discarded
 
 	dPairVerdict := internal.VerdictOK
@@ -438,7 +438,7 @@ func printMeasureResult(mr measureResult, th internal.Thresholds) {
 	fmt.Printf("  num_ctx:        %d\n", cfg.NumCtx)
 	fmt.Printf("  num_predict:    %d\n", cfg.NumPredict)
 	fmt.Printf("  sim_threshold:  %.2f\n", cfg.SimThreshold)
-	fmt.Printf("  prompt:         PromptV1 (%d bytes)\n\n", len(cfg.Prompt))
+	fmt.Printf("  prompt:         %s (%d bytes)\n\n", cfg.PromptVersion, len(cfg.Prompt))
 
 	if mr.DPairVerdict == internal.VerdictSkipped {
 		fmt.Printf("  D_pair:   —     [%s]%s(only %d valid sample(s); need >=2 to compute pairwise similarity)\n",
