@@ -60,18 +60,23 @@ type InstrumentConfig struct {
 	// internal/instrument (which already imports internal), so runMeasure
 	// is expected to populate this field with instrument.PromptV1.
 	Prompt string
+	// PromptVersion identifies which named prompt constant Prompt's value
+	// came from (e.g. instrument.PromptVersion == "PromptV1"), so the
+	// report can print the version without a hardcoded literal at the
+	// print site — printing a literal would silently lie once a future
+	// PromptV2 lands and this field isn't updated alongside it.
+	PromptVersion string
 }
 
 // DispersionResult is the stochastic layer output (D_pair, H) for one spec
 // under one fixed instrument configuration.
 type DispersionResult struct {
-	Instrument string  // e.g. "ollama:qwen3-coder:30b"
-	N          int     // valid samples measured
-	Discarded  int     // invalid generations replaced by retries
-	MeanSim    float64 // mean pairwise cosine similarity of AST features
-	DPair      float64 // 1 - MeanSim
-	Clusters   int     // single-linkage clusters at SimThreshold
-	SimThresh  float64
-	H          float64 // Shannon entropy over cluster sizes, bits
-	HNorm      float64 // H / log2(N), in [0,1]
+	N         int     // valid samples measured
+	Discarded int     // invalid generations replaced by retries
+	MeanSim   float64 // mean pairwise cosine similarity of AST features
+	DPair     float64 // 1 - MeanSim
+	Clusters  int     // single-linkage clusters at SimThreshold
+	SimThresh float64
+	H         float64 // Shannon entropy over cluster sizes, bits
+	HNorm     float64 // H / log2(N), in [0,1]
 }

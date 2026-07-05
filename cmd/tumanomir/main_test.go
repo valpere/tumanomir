@@ -574,26 +574,26 @@ func TestPrintMeasureResultTruncationWarningVisibility(t *testing.T) {
 func TestPrintMeasureResultOKVerdict(t *testing.T) {
 	mr := measureResult{
 		Dispersion: internal.DispersionResult{
-			Instrument: "ollama:qwen3-coder:30b",
-			N:          5,
-			Discarded:  1,
-			MeanSim:    0.82,
-			DPair:      0.18,
-			Clusters:   2,
-			SimThresh:  0.95,
-			H:          1.37,
-			HNorm:      0.59,
+			N:         5,
+			Discarded: 1,
+			MeanSim:   0.82,
+			DPair:     0.18,
+			Clusters:  2,
+			SimThresh: 0.95,
+			H:         1.37,
+			HNorm:     0.59,
 		},
 		Config: internal.InstrumentConfig{
-			Backend:      "ollama",
-			Model:        "qwen3-coder:30b",
-			Temperature:  1.0,
-			Samples:      5,
-			Think:        false,
-			NumCtx:       8192,
-			NumPredict:   2048,
-			SimThreshold: 0.95,
-			Prompt:       "abcde",
+			Backend:       "ollama",
+			Model:         "qwen3-coder:30b",
+			Temperature:   1.0,
+			Samples:       5,
+			Think:         false,
+			NumCtx:        8192,
+			NumPredict:    2048,
+			SimThreshold:  0.95,
+			Prompt:        "abcde",
+			PromptVersion: "PromptV1",
 		},
 		DPairVerdict: internal.VerdictOK,
 		DiscardRate:  1.0 / 6.0,
@@ -643,31 +643,61 @@ func TestPrintMeasureResultOKVerdict(t *testing.T) {
 	}
 }
 
+// TestPrintMeasureResultPromptVersionIsNotHardcoded guards issue #56: the
+// printed prompt-version label must come from cfg.PromptVersion, not a
+// hardcoded "PromptV1" literal at the print site — otherwise the report
+// would keep claiming "PromptV1" even after a hypothetical PromptV2
+// lands, silently violating REQ-MSR-04's reproducibility requirement.
+// Using a fixture value distinct from any real prompt constant name
+// proves the print path threads the config field through unmodified.
+func TestPrintMeasureResultPromptVersionIsNotHardcoded(t *testing.T) {
+	mr := measureResult{
+		Dispersion: internal.DispersionResult{N: 5, MeanSim: 0.82, DPair: 0.18},
+		Config: internal.InstrumentConfig{
+			Backend:       "ollama",
+			Model:         "qwen3-coder:30b",
+			Prompt:        "xyz",
+			PromptVersion: "TotallyDifferentXYZ",
+		},
+		DPairVerdict: internal.VerdictOK,
+	}
+
+	out, _ := captureStdout(t, func() int { printMeasureResult(mr, testThresholds); return 0 })
+
+	want := "  prompt:         TotallyDifferentXYZ (3 bytes)"
+	if !strings.Contains(out, want) {
+		t.Fatalf("want prompt line %q (from cfg.PromptVersion, not a hardcoded literal), got output:\n%s", want, out)
+	}
+	if strings.Contains(out, "PromptV1") {
+		t.Fatalf("prompt line must not contain a hardcoded \"PromptV1\" literal when cfg.PromptVersion is something else, got:\n%s", out)
+	}
+}
+
 // TestPrintMeasureResultBlockVerdict mirrors the OK case but with a D_pair
 // value over threshold, asserting the [block] label and correct values.
 func TestPrintMeasureResultBlockVerdict(t *testing.T) {
 	mr := measureResult{
 		Dispersion: internal.DispersionResult{
-			Instrument: "ollama:qwen3-coder:30b",
-			N:          4,
-			Discarded:  0,
-			MeanSim:    0.55,
-			DPair:      0.45,
-			Clusters:   4,
-			SimThresh:  0.95,
-			H:          2.0,
-			HNorm:      1.0,
+			N:         4,
+			Discarded: 0,
+			MeanSim:   0.55,
+			DPair:     0.45,
+			Clusters:  4,
+			SimThresh: 0.95,
+			H:         2.0,
+			HNorm:     1.0,
 		},
 		Config: internal.InstrumentConfig{
-			Backend:      "ollama",
-			Model:        "qwen3-coder:30b",
-			Temperature:  1.0,
-			Samples:      4,
-			Think:        true,
-			NumCtx:       8192,
-			NumPredict:   2048,
-			SimThreshold: 0.95,
-			Prompt:       "abcde",
+			Backend:       "ollama",
+			Model:         "qwen3-coder:30b",
+			Temperature:   1.0,
+			Samples:       4,
+			Think:         true,
+			NumCtx:        8192,
+			NumPredict:    2048,
+			SimThreshold:  0.95,
+			Prompt:        "abcde",
+			PromptVersion: "PromptV1",
 		},
 		DPairVerdict: internal.VerdictBlock,
 		DiscardRate:  0,
@@ -701,20 +731,20 @@ func TestPrintMeasureResultBlockVerdict(t *testing.T) {
 func TestPrintMeasureResultSkippedVerdict(t *testing.T) {
 	mr := measureResult{
 		Dispersion: internal.DispersionResult{
-			Instrument: "ollama:qwen3-coder:30b",
-			N:          1,
-			Discarded:  4,
+			N:         1,
+			Discarded: 4,
 		},
 		Config: internal.InstrumentConfig{
-			Backend:      "ollama",
-			Model:        "qwen3-coder:30b",
-			Temperature:  1.0,
-			Samples:      5,
-			Think:        false,
-			NumCtx:       8192,
-			NumPredict:   2048,
-			SimThreshold: 0.95,
-			Prompt:       "abcde",
+			Backend:       "ollama",
+			Model:         "qwen3-coder:30b",
+			Temperature:   1.0,
+			Samples:       5,
+			Think:         false,
+			NumCtx:        8192,
+			NumPredict:    2048,
+			SimThreshold:  0.95,
+			Prompt:        "abcde",
+			PromptVersion: "PromptV1",
 		},
 		DPairVerdict: internal.VerdictSkipped,
 		// DiscardRate is deliberately above discardWarnThreshold while
