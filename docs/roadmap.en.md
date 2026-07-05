@@ -59,8 +59,3 @@ end-to-end against a real Ollama instance. Details: [`architecture.md`](architec
 8. **Other projections.** SQL DDL, OpenAPI instead of only Go type
    definitions as `measure`'s generation target — extends applicability
    beyond Go projects.
-
-## Explicitly out of scope (for now)
-
-None — revisit if the list above grows to the point something should be
-deliberately dropped rather than merely deferred.
