@@ -206,10 +206,13 @@ for exactly that reason.
 
 16. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
-    -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB in
-       internal/metrics/benchmark_test.go. Verified: ~2ms (K_drift) and
-       ~17ms (D_const) on a 1MB synthetic corpus — comfortably within
-       budget. The original "no allocations proportional to marker
+    -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
+       BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
+       end-to-end (both metrics run per iteration, mirroring a
+       single-file `check` invocation, not inferred by summing isolated
+       numbers): ~19ms on a 1MB synthetic corpus — comfortably within the
+       100ms budget (K_drift ~2ms, D_const ~17ms individually). The
+       original "no allocations proportional to marker
        count" sub-clause does NOT strictly hold for K_drift's current
        regexp-based implementation — `go test -bench=. -benchmem` shows
        allocations scaling roughly 1:1 with requirement count (inherent

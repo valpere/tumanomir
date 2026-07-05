@@ -46,3 +46,20 @@ func BenchmarkDConst1MB(b *testing.B) {
 		DConst(doc)
 	}
 }
+
+// BenchmarkCheck1MB runs both metrics REQ-NFR-01 actually gates — K_drift
+// and D_const — back to back per iteration, mirroring what a single-file
+// `tumanomir check` invocation does. Reported separately from
+// BenchmarkKDrift1MB/BenchmarkDConst1MB (fix-review, glm-5.1:cloud) so the
+// 100ms budget is checked end-to-end, not inferred by manually summing
+// two isolated benchmark numbers.
+func BenchmarkCheck1MB(b *testing.B) {
+	doc := buildBenchmarkCorpus(1 << 20)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(doc)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		KDrift(doc)
+		DConst(doc)
+	}
+}
