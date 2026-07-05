@@ -68,8 +68,15 @@ for exactly that reason.
    -> [FUN-CHK-02] KDriftResult.HangingIDs []string
 
 3. [REQ-CHK-03] The tool must compute D_const (lexical constraint density)
-   as markers/(markers+prose tokens), where markers are `@schema`,
-   `@constraint`, `[REQ-`, `-> [FUN-`, `-> [LOG-`, `-> [PHY-`.
+   as markers/(markers+prose tokens), where markers are the substrings
+   `@schema`, `@constraint`, `[REQ-`, `-> [FUN-`, `-> [LOG-`, `-> [PHY-`.
+   Markers and prose tokens are disjoint by construction: prose tokens
+   are whitespace-separated tokens of the document with every matched
+   marker byte-span excluded first, so a marker's bytes are never also
+   counted as part of a prose token. Consequently a document consisting
+   entirely of markers (no other prose) must yield D_const = 1.0 exactly
+   — not a value capped below 1.0 by marker text leaking into the prose
+   count (a bug fixed in `dconst.go`, see its own history for detail).
    -> [FUN-CHK-03] metrics.DConst(doc []byte) DConstResult
 
 4. [REQ-CHK-04] `check` must accept a single file or a directory
