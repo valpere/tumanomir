@@ -220,6 +220,13 @@ for exactly that reason.
        same benchmark. D_const's blanking-based implementation (from
        #54) was already allocation-flat (2 allocs/op).
 
+       "Verified" is enforced, not just measured once by hand (issue
+       #67): TestCheckPerformanceBudget fails `go test ./...` if a
+       1MB check exceeds 500ms (generous CI-noise margin over the
+       observed ~17ms); TestKDriftAllocationBudget and
+       TestDConstAllocationBudget fail if either metric's allocation
+       count regresses off its allocation-flat baseline.
+
 17. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only for v0.1
     (no CLI frameworks, no YAML deps until the gate command exists).
     -> [PHY-NFR-02] go.mod with zero external requires
