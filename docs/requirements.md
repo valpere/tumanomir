@@ -80,7 +80,13 @@ for exactly that reason.
    -> [FUN-CHK-03] metrics.DConst(doc []byte) DConstResult
 
 4. [REQ-CHK-04] `check` must accept a single file or a directory
-   (recursively, `*.md` only) and aggregate per-file results.
+   (recursively, `*.md` only) and aggregate per-file results. Directory
+   walks must skip dot-prefixed and `_`-prefixed subdirectories (e.g.
+   `.git`, `.claude`, `_sanity`) — running `check` at a project root must
+   not silently pull in tooling/scratch/archival markdown that isn't the
+   spec under test. An explicitly-passed single file path is never
+   filtered by this rule, even if dot-prefixed — the exclusion applies
+   only to directory walks.
    -> [FUN-CHK-04] spec.Load(path string) ([]Spec, error)
 
 5. [REQ-CHK-05] The deterministic layer must not invoke any LLM or

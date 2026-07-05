@@ -31,12 +31,22 @@ func Load(path string) ([]Spec, error) {
 		return []Spec{{Path: path, Content: content}}, nil
 	}
 
+	root := filepath.Clean(path)
+
 	var specs []Spec
-	err = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+		if d.IsDir() {
+			// The root directory itself is never excluded, even if its own
+			// name is dot- or underscore-prefixed — only descendants are.
+			if p != root && isExcludedDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 			return nil
 		}
 		content, err := os.ReadFile(p)
@@ -53,4 +63,10 @@ func Load(path string) ([]Spec, error) {
 		return nil, fmt.Errorf("no *.md files under %s", path)
 	}
 	return specs, nil
+}
+
+// isExcludedDir reports whether a directory name marks tooling/scratch/
+// archival content that a spec walk must not recurse into (REQ-CHK-04).
+func isExcludedDir(name string) bool {
+	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
 }
