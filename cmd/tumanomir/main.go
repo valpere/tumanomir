@@ -186,6 +186,12 @@ const discardWarnThreshold = 0.40
 // maxAttemptsPerSample is 1 initial attempt + 2 retries, per REQ-MSR-05.
 const maxAttemptsPerSample = 3
 
+// promptEstimateDivergenceFactor flags a generation whose actual
+// PromptEvalCount exceeds the pre-flight byte/3 estimate by more than
+// this multiple — a signal the estimate under-counted (e.g. non-ASCII
+// input), not a calibrated constant. See issue #57.
+const promptEstimateDivergenceFactor = 1.5
+
 // measureResult holds the stochastic layer's aggregated metric values,
 // discard-rate warning state, and gate verdict.
 //
@@ -203,6 +209,13 @@ type measureResult struct {
 	// generation stopped), not something dispersion.Analyze's pure
 	// AST-similarity computation has any business knowing about.
 	Truncated int
+	// PromptUnderestimated is the count of generations (valid or not)
+	// whose actual PromptEvalCount exceeded the pre-flight byte/3
+	// estimate by more than promptEstimateDivergenceFactor — the
+	// heuristic under-counts non-ASCII prompts, so this is a diagnostic
+	// signal that the preflight's "errs toward refusing" guarantee may
+	// not have held for this run (issue #57).
+	PromptUnderestimated int
 }
 
 // runMeasure parses flags, validates the positional spec-file argument,
@@ -340,15 +353,25 @@ func runMeasure(args []string) int {
 func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentConfig, specContent []byte, samples int, th internal.Thresholds) (measureResult, error) {
 	prompt := instrument.BuildPrompt(specContent)
 
+	promptEstimate := instrument.EstimatePromptTokens(prompt)
+
 	var sources [][]byte
 	discarded := 0
 	truncated := 0
+	underestimated := 0
 	for slot := 0; slot < samples; slot++ {
 		valid := false
 		for attempt := 0; attempt < maxAttemptsPerSample; attempt++ {
 			g, err := gen.Generate(context.Background(), prompt)
 			if err != nil {
 				return measureResult{}, fmt.Errorf("generation failed: %w", err)
+			}
+			// The byte/3 preflight estimate under-counts non-ASCII (e.g.
+			// Cyrillic) prompts; cross-check against the backend's actual
+			// count post-hoc, since a stdlib-only pre-flight fix isn't
+			// possible without a real tokenizer (issue #57).
+			if promptEstimate > 0 && float64(g.PromptEvalCount) > float64(promptEstimate)*promptEstimateDivergenceFactor {
+				underestimated++
 			}
 			block, ok := instrument.ExtractGoBlock(g.Text)
 			if ok && dispersion.ValidGo(block) {
@@ -394,12 +417,13 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 	}
 
 	return measureResult{
-		Dispersion:   result,
-		Config:       cfg,
-		DPairVerdict: dPairVerdict,
-		DiscardRate:  discardRate,
-		DiscardWarn:  discardRate > discardWarnThreshold,
-		Truncated:    truncated,
+		Dispersion:           result,
+		Config:               cfg,
+		DPairVerdict:         dPairVerdict,
+		DiscardRate:          discardRate,
+		DiscardWarn:          discardRate > discardWarnThreshold,
+		Truncated:            truncated,
+		PromptUnderestimated: underestimated,
 	}, nil
 }
 
@@ -427,6 +451,11 @@ func printMeasureResult(mr measureResult, th internal.Thresholds) {
 	if mr.Truncated > 0 {
 		fmt.Printf("⚠ %d/%d accepted generations had done_reason=length (truncated by num_predict) — their AST may not reflect the model's full intended output; consider raising --num-predict\n\n",
 			mr.Truncated, mr.Dispersion.N)
+	}
+
+	if mr.PromptUnderestimated > 0 {
+		fmt.Printf("⚠ %d generation(s) had an actual prompt-token count over %.1fx the preflight estimate — the byte/3 heuristic under-counts non-ASCII (e.g. Cyrillic) prompts and may not have caught a real truncation risk; verify --num-ctx has enough headroom\n\n",
+			mr.PromptUnderestimated, promptEstimateDivergenceFactor)
 	}
 
 	fmt.Println("Instrument config (REQ-MSR-04):")
