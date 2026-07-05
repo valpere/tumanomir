@@ -104,6 +104,18 @@ func TestKDriftBackToBackTags(t *testing.T) {
 	}
 }
 
+// TestKDriftMalformedTagThenValidTag guards findReqTag's continuation
+// loop (fix-review, glm-5.1:cloud) — the only new branch the
+// all-malformed and all-well-formed fixtures above don't exercise
+// together: a rejected [REQ-] occurrence must not stop the scan; a
+// well-formed tag afterward must still be found and correctly traced.
+func TestKDriftMalformedTagThenValidTag(t *testing.T) {
+	res := KDrift([]byte("[REQ-] [REQ-A-01]\n-> [FUN-A-01]\n"))
+	if res.Requirements != 1 || res.Hanging != 0 {
+		t.Fatalf("want 1 req (malformed [REQ-] skipped), 0 hanging; got %+v", res)
+	}
+}
+
 func TestDConstMarkersRaiseDensity(t *testing.T) {
 	fog := DConst([]byte("the system should flexibly accept transactions from various providers"))
 	sharp := DConst([]byte(tracedSpec))

@@ -55,8 +55,13 @@ func findReqTag(doc []byte, i int) (start, end, idStart, idEnd int, found bool) 
 			return p, j + 1, idStart, j, true
 		}
 		// Not a valid tag at this position (empty or unterminated ID) —
-		// keep scanning for a later occurrence.
-		i = p + 1
+		// keep scanning for a later occurrence. Advancing past the whole
+		// matched prefix (not just 1 byte) is safe — none of "[REQ-"'s
+		// own bytes after the first is '[', so no overlapping match could
+		// start inside it — and avoids O(n²) rescanning on a document
+		// with many false "[REQ-" occurrences (fix-review,
+		// deepseek-v4-flash:cloud).
+		i = p + len(reqTagPrefix)
 	}
 }
 
@@ -86,7 +91,12 @@ func hasEdgeMarker(block []byte) bool {
 				return true
 			}
 		}
-		i = p + 1
+		// No prefix matched (or the ID after it was empty/unterminated)
+		// at this arrow — advance past the whole "->" (safe: its second
+		// byte is '>', so no overlapping "->" can start inside it) rather
+		// than 1 byte, avoiding O(n²) rescanning on a block with many
+		// false arrows (fix-review, deepseek-v4-flash:cloud).
+		i = p + len(edgeArrow)
 	}
 }
 
