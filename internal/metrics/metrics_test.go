@@ -66,3 +66,71 @@ func TestDConstEmptyDoc(t *testing.T) {
 		t.Fatalf("empty doc density must be 0, got %f", res.Value)
 	}
 }
+
+// TestDConstPureMarkersYieldsOne guards REQ-CHK-03's disjoint marker/prose
+// invariant: a document made ONLY of marker substrings must have zero
+// leftover prose tokens, so density is exactly 1.0 — not 0.5, which is
+// what len(bytes.Fields(doc)) over the un-blanked original produces (every
+// marker byte-span re-appears as a whitespace-separated "prose" token).
+func TestDConstPureMarkersYieldsOne(t *testing.T) {
+	pure := "@schema @constraint [REQ- -> [FUN- -> [LOG- -> [PHY-"
+	res := DConst([]byte(pure))
+	if res.ConstraintMarkers != 6 {
+		t.Fatalf("want 6 markers (one per constraintMarkers entry), got %+v", res)
+	}
+	if res.ProseTokens != 0 {
+		t.Fatalf("pure-marker doc must have zero prose tokens, got %+v", res)
+	}
+	if res.Value != 1.0 {
+		t.Fatalf("pure-marker doc must have density exactly 1.0, got %+v", res)
+	}
+}
+
+// TestDConstMixedFixtureExactDensity is a regression guard against the
+// marker/prose double-counting bug (#54): 25 hand-counted prose words that
+// share no bytes with any marker, plus 6 hand-counted markers each isolated
+// on its own line. Under the old code (res.ProseTokens = len(bytes.Fields(doc))
+// over the un-blanked original) each marker line contributes 1-2 extra
+// "prose" tokens too (@schema, @constraint, [REQ- each count as one token;
+// "-> [FUN-", "-> [LOG-", "-> [PHY-" each split into two whitespace tokens
+// "->" and the bracket piece), inflating the denominator from 25 to 34 and
+// the density from 6/31=0.193548... down to 6/40=0.15. This test asserts
+// the corrected 6/31 value, which the old code could not produce.
+func TestDConstMixedFixtureExactDensity(t *testing.T) {
+	mixed := `The team wrote a long document about payments and settlement flows using careful precise language throughout the specification for clarity and completeness across every corner.
+
+@schema
+@constraint
+[REQ-
+-> [FUN-
+-> [LOG-
+-> [PHY-
+`
+	res := DConst([]byte(mixed))
+	if res.ConstraintMarkers != 6 {
+		t.Fatalf("want 6 markers, got %+v", res)
+	}
+	if res.ProseTokens != 25 {
+		t.Fatalf("want 25 prose tokens (hand-counted words sharing no bytes with any marker), got %+v", res)
+	}
+	want := 6.0 / 31.0
+	if res.Value != want {
+		t.Fatalf("want density %v (6/31), got %+v", want, res)
+	}
+}
+
+// TestDConstMultiTokenMarkerBlanksBothPieces guards the byte-span-blanking
+// approach against a naive per-whitespace-token exclusion: the marker
+// "-> [FUN-" spans two whitespace-separated pieces ("->" and "[FUN-CHK-01]").
+// Blanking only the matched marker bytes must leave exactly the true
+// leftover ("CHK-01]") as a single prose token — not zero (both pieces
+// dropped whole) and not two (neither piece recognized as marker-bearing).
+func TestDConstMultiTokenMarkerBlanksBothPieces(t *testing.T) {
+	res := DConst([]byte("-> [FUN-CHK-01]"))
+	if res.ConstraintMarkers != 1 {
+		t.Fatalf("want 1 marker, got %+v", res)
+	}
+	if res.ProseTokens != 1 {
+		t.Fatalf("want exactly 1 leftover prose token (\"CHK-01]\"), got %+v", res)
+	}
+}

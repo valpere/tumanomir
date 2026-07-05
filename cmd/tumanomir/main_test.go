@@ -158,7 +158,7 @@ func TestAggregate(t *testing.T) {
 			wantHangingID: nil,
 			wantKDValue:   0,
 			wantDCMarkers: 4,
-			wantDCProse:   5,
+			wantDCProse:   2,
 		},
 		{
 			name: "K_drift block",
@@ -172,7 +172,7 @@ func TestAggregate(t *testing.T) {
 			wantHangingID: []string{"a.md: REQ-A-02"},
 			wantKDValue:   0.5,
 			wantDCMarkers: 3,
-			wantDCProse:   7,
+			wantDCProse:   6,
 		},
 		{
 			name: "D_const warn",
@@ -194,7 +194,7 @@ func TestAggregate(t *testing.T) {
 			wantHangingID: nil,
 			wantKDValue:   0,
 			wantDCMarkers: 6,
-			wantDCProse:   36,
+			wantDCProse:   33,
 		},
 		{
 			name: "multi-file aggregation",
@@ -209,7 +209,7 @@ func TestAggregate(t *testing.T) {
 			wantHangingID: []string{"a.md: REQ-A-02", "b.md: REQ-B-01"},
 			wantKDValue:   2.0 / 3.0,
 			wantDCMarkers: 4,
-			wantDCProse:   9,
+			wantDCProse:   8,
 		},
 		{
 			name: "zero requirements",
