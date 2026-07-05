@@ -572,6 +572,33 @@ func TestRunMeasureWithGeneratorNoPromptUnderestimateWarning(t *testing.T) {
 	}
 }
 
+// TestRunMeasureWithGeneratorPromptUnderestimateBoundary guards the
+// strict '>' in the threshold comparison (fix-review, glm-5.1:cloud +
+// kimi-k2.6:cloud, independently): a PromptEvalCount landing exactly at
+// promptEstimateDivergenceFactor x the estimate must NOT trigger the
+// counter — only strictly exceeding it should. Protects against a future
+// accidental change to '>='.
+func TestRunMeasureWithGeneratorPromptUnderestimateBoundary(t *testing.T) {
+	specContent := []byte("spec")
+	estimate := instrument.EstimatePromptTokens(instrument.BuildPrompt(specContent))
+	atThreshold := int(float64(estimate) * promptEstimateDivergenceFactor)
+
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return instrument.Generation{
+			Text:            goBlock(testSrcFoo),
+			PromptEvalCount: atThreshold, // exactly 1.5x: must NOT trigger (strict >)
+		}, nil
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, specContent, 3, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.PromptUnderestimated != 0 {
+		t.Fatalf("PromptUnderestimated = %d, want 0 at exactly the threshold (%d); got %+v", mr.PromptUnderestimated, atThreshold, mr)
+	}
+}
+
 func TestPrintMeasureResultDiscardWarningVisibility(t *testing.T) {
 	warnMR := measureResult{
 		Dispersion:  internal.DispersionResult{N: 2, Discarded: 8},

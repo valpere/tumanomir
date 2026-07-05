@@ -454,7 +454,7 @@ func printMeasureResult(mr measureResult, th internal.Thresholds) {
 	}
 
 	if mr.PromptUnderestimated > 0 {
-		fmt.Printf("⚠ %d generation(s) had an actual prompt-token count over %.0fx the preflight estimate — the byte/3 heuristic under-counts non-ASCII (e.g. Cyrillic) prompts and may not have caught a real truncation risk; verify --num-ctx has enough headroom\n\n",
+		fmt.Printf("⚠ %d generation(s) had an actual prompt-token count over %.1fx the preflight estimate — the byte/3 heuristic under-counts non-ASCII (e.g. Cyrillic) prompts and may not have caught a real truncation risk; verify --num-ctx has enough headroom\n\n",
 			mr.PromptUnderestimated, promptEstimateDivergenceFactor)
 	}
 
