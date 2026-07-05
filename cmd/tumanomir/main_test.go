@@ -523,6 +523,55 @@ func TestRunMeasureWithGeneratorNoTruncation(t *testing.T) {
 	}
 }
 
+// TestRunMeasureWithGeneratorFlagsPromptUnderestimate verifies that a
+// generation whose actual PromptEvalCount exceeds the preflight byte/3
+// estimate by more than promptEstimateDivergenceFactor is counted in
+// measureResult.PromptUnderestimated (issue #57): the heuristic
+// under-counts non-ASCII prompts, so this is a diagnostic signal that the
+// preflight's "errs toward refusing" guarantee may not have held.
+func TestRunMeasureWithGeneratorFlagsPromptUnderestimate(t *testing.T) {
+	specContent := []byte("spec")
+	estimate := instrument.EstimatePromptTokens(instrument.BuildPrompt(specContent))
+
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return instrument.Generation{
+			Text:            goBlock(testSrcFoo),
+			PromptEvalCount: int(float64(estimate) * 2), // well above the 1.5x threshold
+		}, nil
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, specContent, 3, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.PromptUnderestimated != 3 {
+		t.Fatalf("PromptUnderestimated = %d, want 3 (all 3 accepted generations exceed the estimate); got %+v", mr.PromptUnderestimated, mr)
+	}
+}
+
+// TestRunMeasureWithGeneratorNoPromptUnderestimateWarning verifies
+// PromptUnderestimated stays 0 when the actual PromptEvalCount tracks the
+// preflight estimate closely (ASCII-sized prompt, no real divergence).
+func TestRunMeasureWithGeneratorNoPromptUnderestimateWarning(t *testing.T) {
+	specContent := []byte("spec")
+	estimate := instrument.EstimatePromptTokens(instrument.BuildPrompt(specContent))
+
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return instrument.Generation{
+			Text:            goBlock(testSrcFoo),
+			PromptEvalCount: estimate, // exactly at the estimate: no divergence
+		}, nil
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, specContent, 3, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v", err)
+	}
+	if mr.PromptUnderestimated != 0 {
+		t.Fatalf("PromptUnderestimated = %d, want 0; got %+v", mr.PromptUnderestimated, mr)
+	}
+}
+
 func TestPrintMeasureResultDiscardWarningVisibility(t *testing.T) {
 	warnMR := measureResult{
 		Dispersion:  internal.DispersionResult{N: 2, Discarded: 8},
@@ -564,6 +613,32 @@ func TestPrintMeasureResultTruncationWarningVisibility(t *testing.T) {
 	out, _ = captureStdout(t, func() int { printMeasureResult(noTruncMR, testThresholds); return 0 })
 	if strings.Contains(out, "done_reason=length") {
 		t.Fatalf("must not print the truncation warning when Truncated=0, got:\n%s", out)
+	}
+}
+
+// TestPrintMeasureResultPromptUnderestimateWarningVisibility verifies the
+// prompt-token-underestimate warning (issue #57) appears when
+// PromptUnderestimated > 0 and is absent when it's 0 — a separate line
+// from the discard-rate and truncation warnings, since it flags a
+// distinct failure mode (preflight estimate divergence, not invalid or
+// truncated output).
+func TestPrintMeasureResultPromptUnderestimateWarningVisibility(t *testing.T) {
+	underMR := measureResult{
+		Dispersion:           internal.DispersionResult{N: 10, Discarded: 0},
+		Config:               internal.InstrumentConfig{Backend: "ollama", Model: "test"},
+		PromptUnderestimated: 4,
+	}
+	out, _ := captureStdout(t, func() int { printMeasureResult(underMR, testThresholds); return 0 })
+	wantWarn := "4 generation(s) had an actual prompt-token count"
+	if !strings.Contains(out, wantWarn) {
+		t.Fatalf("want a prompt-underestimate warning line containing %q for PromptUnderestimated=4, got:\n%s", wantWarn, out)
+	}
+
+	noneMR := underMR
+	noneMR.PromptUnderestimated = 0
+	out, _ = captureStdout(t, func() int { printMeasureResult(noneMR, testThresholds); return 0 })
+	if strings.Contains(out, "preflight estimate") {
+		t.Fatalf("must not print the prompt-underestimate warning when PromptUnderestimated=0, got:\n%s", out)
 	}
 }
 

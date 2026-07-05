@@ -79,6 +79,22 @@ type chatResponse struct {
 	Error           string      `json:"error"`
 }
 
+// EstimatePromptTokens is the conservative, stdlib-only token estimate
+// used by Generate's preflight (no tokenizer in v0.1): ~3 bytes/token,
+// rounded up, errs toward refusing rather than passing a prompt that
+// would truncate the output. Plain len(prompt)/3 would round down and
+// could underestimate, defeating the "errs toward refusing" guarantee.
+//
+// The guarantee itself only holds for ~ASCII input: Cyrillic UTF-8 runs
+// ~2 bytes/char, so this heuristic can still under-count real token usage
+// for non-ASCII specs (this project's own specs are Ukrainian). Exported
+// so callers can independently cross-check a completed generation's
+// actual PromptEvalCount against the estimate that gated it, since a
+// stdlib-only pre-flight fix isn't possible without a real tokenizer.
+func EstimatePromptTokens(prompt string) int {
+	return (len(prompt) + 2) / 3
+}
+
 // Generate implements Generator. It runs a stdlib-only prompt-size
 // preflight before making any HTTP call (REQ-MSR-06): num_ctx must have
 // headroom for both the prompt and the requested output length, or the
@@ -86,12 +102,7 @@ type chatResponse struct {
 func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error) {
 	cfg := o.Config
 
-	// Conservative, stdlib-only token estimate (no tokenizer in v0.1):
-	// ~3 bytes/token, rounded up, errs toward refusing rather than passing
-	// a prompt that would truncate the output. Plain len(prompt)/3 would
-	// round down and could underestimate, defeating the "errs toward
-	// refusing" guarantee.
-	estimatedPromptTokens := (len(prompt) + 2) / 3
+	estimatedPromptTokens := EstimatePromptTokens(prompt)
 	if estimatedPromptTokens+cfg.NumPredict > cfg.NumCtx {
 		return Generation{}, fmt.Errorf(
 			"instrument: estimated prompt tokens (%d, len(prompt)/3 heuristic) + num_predict (%d) exceeds num_ctx (%d); increase num_ctx or reduce num_predict",
