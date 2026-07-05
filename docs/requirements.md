@@ -6,7 +6,16 @@ Productization of the "Source of the Unknown" methodology (see
 
 This document is written in tumanomir's own traceable markup
 (`[REQ-*] -> [FUN-*]`, `@schema`) — the tool must be able to measure its
-own specification (dogfooding).
+own specification (dogfooding). The bracket distinguishes a definition
+from a reference: a bracketed `[REQ-*]` tag at the start of a numbered
+item *defines* that requirement, and `metrics.KDrift` (`internal/metrics/
+kdrift.go`) counts every such occurrence — literally, by regex, with no
+positional awareness — so a bracketed ID written anywhere else in this
+document (including in an explanatory sentence like this one) would
+register as a second, untraced "requirement." A bare mention elsewhere in
+prose (e.g. "see REQ-CFG-01" below, with no brackets) is a
+cross-reference, not a definition, and is deliberately left unbracketed
+for exactly that reason.
 
 ---
 
@@ -161,6 +170,22 @@ own specification (dogfooding).
     the article's hypothesis values (0.20 / 0.35 / 0.30) and must be
     documented as uncalibrated starting points.
     -> [FUN-CFG-01] internal.DefaultThresholds(); flag wiring in cmd
+
+    **v0.1 divergence from the article's protocol, declared per
+    REQ-NFR-03 rather than left silent:** the article treats a ΔH
+    calibration baseline (measuring against a zero-ambiguity reference
+    spec, not an absolute value) as an obligatory step, and warns that
+    quality-gate thresholds must be set at a working temperature
+    (~0.3–0.5), never at the stress-test temperature (~1.0) used to
+    probe the model's interpretive range — "numbers from the stress test
+    are not substituted into gates." v0.1 does neither: `measure`'s
+    default temperature is 1.0, and D_pair is gated as an absolute value
+    against 0.30, not as a delta against a calibrated baseline measured
+    at working temperature. This is a deliberate, temporary
+    simplification pending the `calibrate` roadmap item, not a silent
+    methodology change — anyone tuning `--d-pair-max` or `--temp` should
+    read the resulting number as a stress-test-regime absolute, not the
+    article's calibrated, working-temperature delta.
 
 ---
 
