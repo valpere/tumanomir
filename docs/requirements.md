@@ -210,18 +210,15 @@ for exactly that reason.
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
        end-to-end (both metrics run per iteration, mirroring a
        single-file `check` invocation, not inferred by summing isolated
-       numbers): ~19ms on a 1MB synthetic corpus — comfortably within the
-       100ms budget (K_drift ~2ms, D_const ~17ms individually). The
-       original "no allocations proportional to marker
-       count" sub-clause does NOT strictly hold for K_drift's current
-       regexp-based implementation — `go test -bench=. -benchmem` shows
-       allocations scaling roughly 1:1 with requirement count (inherent
-       to regexp.FindAllSubmatchIndex's match-result construction), not
-       allocation-flat. Timing stays well within the 100ms budget
-       regardless; noted here as a known, measured characteristic rather
-       than silently dropped or falsely claimed as met. D_const's
-       implementation IS allocation-flat (2 allocs/op independent of
-       marker count).
+       numbers): ~17ms on a 1MB synthetic corpus — comfortably within the
+       100ms budget (K_drift ~0.25ms, D_const ~17ms individually).
+       Both metrics are now allocation-flat: K_drift was rewritten
+       (issue #66) from regexp.FindAllSubmatchIndex (which allocated one
+       []int per match — 3260 allocs/op, ~1:1 with requirement count) to
+       a hand-written byte scanner, dropping to 14 allocs/op independent
+       of requirement count (a ~233x reduction) and ~9x faster in the
+       same benchmark. D_const's blanking-based implementation (from
+       #54) was already allocation-flat (2 allocs/op).
 
 17. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only for v0.1
     (no CLI frameworks, no YAML deps until the gate command exists).
