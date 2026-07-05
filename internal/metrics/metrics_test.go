@@ -50,6 +50,72 @@ func TestKDriftNoRequirements(t *testing.T) {
 	}
 }
 
+// The following guard the hand-written scanner (issue #66) against
+// behavioral drift from the regexp it replaced: `\[(REQ-[A-Za-z0-9_-]+)\]`
+// for tags, `->\s*\[(?:FUN|LOG|PHY)-[A-Za-z0-9_-]+\]` for edges.
+
+func TestKDriftEdgeMarkerZeroWhitespace(t *testing.T) {
+	// ->\s* allows zero whitespace between the arrow and the bracket.
+	res := KDrift([]byte("[REQ-A-01] x\n->[FUN-A-01] y\n"))
+	if res.Requirements != 1 || res.Hanging != 0 {
+		t.Fatalf("want 1 req, 0 hanging (no space is still a valid edge); got %+v", res)
+	}
+}
+
+func TestKDriftEdgeMarkerMultiWhitespace(t *testing.T) {
+	// ->\s* is greedy over any run of \s = [\t\n\f\r ], not just single spaces.
+	res := KDrift([]byte("[REQ-A-01] x\n->  \t\n [FUN-A-01] y\n"))
+	if res.Requirements != 1 || res.Hanging != 0 {
+		t.Fatalf("want 1 req, 0 hanging (mixed whitespace run is still valid); got %+v", res)
+	}
+}
+
+func TestKDriftEdgeMarkerLogAndPhy(t *testing.T) {
+	res := KDrift([]byte("[REQ-A-01] x\n-> [LOG-A-01] y\n[REQ-A-02] z\n-> [PHY-A-02] w\n"))
+	if res.Requirements != 2 || res.Hanging != 0 {
+		t.Fatalf("want 2 reqs, 0 hanging (LOG-/PHY- are valid edge kinds too); got %+v", res)
+	}
+}
+
+func TestKDriftMalformedTagsNotCounted(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{"empty id", "[REQ-] x\n"},
+		{"unterminated", "[REQ-A-01 x\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := KDrift([]byte(tt.doc))
+			if res.Requirements != 0 {
+				t.Fatalf("want 0 requirements for malformed tag %q, got %+v", tt.doc, res)
+			}
+		})
+	}
+}
+
+func TestKDriftBackToBackTags(t *testing.T) {
+	// No content between a tag's closing ']' and the next tag's '[' —
+	// exercises the scanner's continuation point precisely.
+	res := KDrift([]byte("[REQ-A-01][REQ-A-02]\n-> [FUN-A-02]\n"))
+	if res.Requirements != 2 || res.Hanging != 1 || len(res.HangingIDs) != 1 || res.HangingIDs[0] != "REQ-A-01" {
+		t.Fatalf("want 2 reqs, 1 hanging (REQ-A-01); got %+v", res)
+	}
+}
+
+// TestKDriftMalformedTagThenValidTag guards findReqTag's continuation
+// loop (fix-review, glm-5.1:cloud) — the only new branch the
+// all-malformed and all-well-formed fixtures above don't exercise
+// together: a rejected [REQ-] occurrence must not stop the scan; a
+// well-formed tag afterward must still be found and correctly traced.
+func TestKDriftMalformedTagThenValidTag(t *testing.T) {
+	res := KDrift([]byte("[REQ-] [REQ-A-01]\n-> [FUN-A-01]\n"))
+	if res.Requirements != 1 || res.Hanging != 0 {
+		t.Fatalf("want 1 req (malformed [REQ-] skipped), 0 hanging; got %+v", res)
+	}
+}
+
 func TestDConstMarkersRaiseDensity(t *testing.T) {
 	fog := DConst([]byte("the system should flexibly accept transactions from various providers"))
 	sharp := DConst([]byte(tracedSpec))
