@@ -2,7 +2,7 @@
 
 Specification-precision measurement tool for AI-driven software projects.
 Productization of the "Source of the Unknown" methodology (see
-`context/history.md` for provenance).
+`docs/investigation/history.md` for provenance).
 
 This document is written in tumanomir's own traceable markup
 (`[REQ-*] -> [FUN-*]`, `@schema`) — the tool must be able to measure its
@@ -26,7 +26,7 @@ own specification (dogfooding).
   think: Bool @constraint(default: false),
   num_ctx: Int @constraint(rule: "must exceed prompt token count"),
   num_predict: Int @constraint(rule: "must exceed natural output length"),
-  sim_threshold: Float @constraint(default: 0.95, range: [0,1], rule: "no default currently wired in code — SimThreshold is a caller-supplied parameter to dispersion.Analyze; 0.95 is a proposed hypothesis default matching the article's experiment, not a calibrated constant"),
+  sim_threshold: Float @constraint(default: 0.95, range: [0,1], rule: "the measure command's --sim-threshold flag defaults to 0.95 (a proposed hypothesis matching the article's experiment, not a calibrated constant); dispersion.Analyze itself takes SimThreshold as a required caller-supplied parameter with no internal default"),
   prompt: String @constraint(rule: "named, versioned package-level constant, not an inline literal — instrument-relative config, must be reproducible from the report")
 }
 
@@ -34,7 +34,7 @@ own specification (dogfooding).
   k_drift: KDriftResult?,
   d_const: DConstResult?,
   dispersion: DispersionResult?,
-  verdict: Enum["ok","warn","block"],
+  verdict: Enum["ok","warn","block","skipped"],
   exit_code: Int @constraint(in: [0,1,2])
 }
 
@@ -145,10 +145,13 @@ own specification (dogfooding).
 
 ### 2.3 Output and gating
 
-13. [REQ-OUT-01] Human-readable TTY output: one line per metric with
-    value, verdict (ok/warn/block) and the threshold it was judged
-    against.
-    -> [FUN-OUT-01] report.Render(w io.Writer, r Report)
+13. [REQ-OUT-01] Human-readable TTY output: one line per gated metric
+    with value, verdict (ok/warn/block/skipped) and the threshold it was
+    judged against. Ordinal signals (H, H_norm) are printed without a
+    verdict/threshold column, since they never gate (REQ-MSR-02).
+    -> [FUN-OUT-01] currently inline in cmd/tumanomir/main.go
+       (printMeasureResult and the check renderer); extraction into a
+       report.Render(w io.Writer, r Report) is planned — see roadmap
 
 14. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
     failed, 2 = execution error. CI-composable by construction.
@@ -165,7 +168,8 @@ own specification (dogfooding).
 
 16. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms (single pass, no allocations proportional to marker count).
-    -> [PHY-NFR-01] benchmark in internal/metrics
+    -> [PHY-NFR-01] benchmark in internal/metrics — not yet written; the
+       performance target is currently unverified (tracked in the backlog)
 
 17. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only for v0.1
     (no CLI frameworks, no YAML deps until the gate command exists).

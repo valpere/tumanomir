@@ -29,9 +29,10 @@ Roadmap (що ще не збудовано і в якому порядку) — 
 
 Методологічні інваріанти (зі статті, не відкочувати без оновлення
 `docs/requirements.md`):
-- D_pair — робоча метрика; H_norm (= H / log₂N) — ordinal («один кластер чи
-  багато»), саме вона репортиться/гейтиться; сира H (біти) обчислюється
-  внутрішньо, але сатурує на log₂N при малих N.
+- D_pair — робоча метрика й єдиний гейт стохастичного шару; H_norm
+  (= H / log₂N) — ordinal («один кластер чи багато»), репортиться, але
+  ніколи не гейтить; сира H (біти) теж друкується у звіті, але сатурує на
+  log₂N при малих N.
 - Метрики instrument-relative: повна конфігурація (backend, модель, temp, N,
   think, num_ctx, num_predict, sim_threshold, промпт) фіксується і
   друкується в кожному звіті `measure` (REQ-MSR-04).
@@ -39,7 +40,7 @@ Roadmap (що ще не збудовано і в якому порядку) — 
   discards, попередження при discard rate > 40%).
 - Пороги — гіпотези за замовчуванням (0.20 / 0.35 / 0.30), калібруються
   користувачем; лише K_drift і D_pair гейтять exit code, D_const і H_norm —
-  ordinal/advisory (REQ-CHK-06).
+  ordinal/advisory (REQ-CHK-06 для D_const, REQ-MSR-02 для H_norm).
 - Для reasoning-моделей — `think: false`; `num_ctx` перевіряється проти
   оцінки розміру промпту до HTTP-виклику (silent truncation = баг
   цілісності виміру, не попередження).
@@ -49,6 +50,7 @@ Roadmap (що ще не збудовано і в якому порядку) — 
 ```
 tumanomir check [flags] <file.md|dir>   # детермінований шар: K_drift, D_const
 tumanomir measure [flags] <file.md>     # стохастичний шар: D_pair, H_norm
+tumanomir version                       # надрукувати версію і вийти
 
 # check
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
@@ -62,6 +64,7 @@ tumanomir measure [flags] <file.md>     # стохастичний шар: D_pai
 --num-ctx        int     required: context window; must exceed the prompt token count
 --num-predict    int     required: max generated tokens; must exceed natural output length
 --think          bool    enable reasoning-model think mode (default false)
+--d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
 ```
 
 Вивід — людський у TTY; exit code: 0 ok / 1 gate failed / 2 error.
@@ -86,5 +89,5 @@ internal/instrument/    інтерфейс Generator, Ollama-бекенд, Promp
 `cmd/tumanomir/main.go`, позначений `TODO(REQ-OUT-01)` — винесення в
 окремий `internal/report/` заплановане, див. roadmap.
 
-Походження коду dispersion: порт `sanity/analyze/main.go` з експерименту
-статті.
+Походження коду dispersion: порт `docs/investigation/_sanity/analyze/main.go`
+з експерименту статті.

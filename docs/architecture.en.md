@@ -30,9 +30,10 @@ The roadmap (what's not built yet, and in what order) lives separately in
 
 Methodological invariants (from the article; don't roll back without
 updating `docs/requirements.md` first):
-- D_pair is the working metric; H_norm (= H / log₂N) is ordinal ("one
-  cluster or many") and the one actually reported/gated on; raw H (bits)
-  is computed internally but saturates at log₂N for small N.
+- D_pair is the working metric and the only stochastic-layer gate; H_norm
+  (= H / log₂N) is ordinal ("one cluster or many"), reported but never
+  gated; raw H (bits) is also printed in the report but saturates at
+  log₂N for small N.
 - Metrics are instrument-relative: the full configuration (backend, model,
   temperature, N, think, num_ctx, num_predict, sim_threshold, prompt) is
   fixed and printed in every `measure` report (REQ-MSR-04).
@@ -40,7 +41,7 @@ updating `docs/requirements.md` first):
   counter, and a prominent warning above a 40% discard rate).
 - Thresholds are default hypotheses (0.20 / 0.35 / 0.30), calibrated by the
   user; only K_drift and D_pair gate the exit code — D_const and H_norm
-  are ordinal/advisory (REQ-CHK-06).
+  are ordinal/advisory (REQ-CHK-06 for D_const, REQ-MSR-02 for H_norm).
 - For reasoning models — `think: false`; `num_ctx` is checked against an
   estimated prompt size before any HTTP call (silent truncation is a
   measurement-integrity bug, not a warning).
@@ -50,6 +51,7 @@ updating `docs/requirements.md` first):
 ```
 tumanomir check [flags] <file.md|dir>   # deterministic layer: K_drift, D_const
 tumanomir measure [flags] <file.md>     # stochastic layer: D_pair, H_norm
+tumanomir version                       # print version and exit
 
 # check
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
@@ -63,6 +65,7 @@ tumanomir measure [flags] <file.md>     # stochastic layer: D_pair, H_norm
 --num-ctx        int     required: context window; must exceed the prompt token count
 --num-predict    int     required: max generated tokens; must exceed natural output length
 --think          bool    enable reasoning-model think mode (default false)
+--d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
 ```
 
 Output is human-readable in a TTY; exit code: 0 ok / 1 gate failed / 2 error.
@@ -87,5 +90,5 @@ Report rendering (`checkResult`/`measureResult`) is currently inline in
 `cmd/tumanomir/main.go`, marked `TODO(REQ-OUT-01)` — extracting it into a
 dedicated `internal/report/` package is planned, see the roadmap.
 
-Origin of the dispersion code: a port of `sanity/analyze/main.go` from the
-article's experiment.
+Origin of the dispersion code: a port of
+`docs/investigation/_sanity/analyze/main.go` from the article's experiment.

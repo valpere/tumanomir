@@ -40,11 +40,12 @@ Productization of the methodology from the article "Source of the Unknown".
 
 ## Methodological invariants (do not change silently; requirements first)
 
-- **D_pair** (1 − mean pairwise AST sim) — the working metric; **H_norm**
-  (= H / log₂N, normalized cluster entropy) is an ordinal signal only
-  ("one cluster or many"), and it's the one actually reported/gated on.
-  Raw **H** (bits) is computed internally but saturates at log₂N for small
-  N and so is not comparable across different N by itself.
+- **D_pair** (1 − mean pairwise AST sim) — the working metric and the
+  only stochastic-layer gate; **H_norm** (= H / log₂N, normalized cluster
+  entropy) is an ordinal signal only ("one cluster or many"), reported
+  but never gated. Raw **H** (bits) is also printed in the report, but it
+  saturates at log₂N for small N and so is not comparable across different
+  N by itself — H_norm is the preferred ordinal form.
 - All stochastic measurements are **instrument-relative**: the instrument
   configuration (model+version, prompt, temp, N, think, num_ctx,
   clustering threshold) is fixed and printed in every report.
