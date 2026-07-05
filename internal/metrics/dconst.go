@@ -24,6 +24,12 @@ var constraintMarkers = [][]byte{
 func DConst(doc []byte) internal.DConstResult {
 	var res internal.DConstResult
 
+	// prose is a blanked-out copy of doc: matched marker byte-spans are
+	// replaced with spaces (same length, so nothing shifts) before the
+	// prose-token count runs. This keeps markers and prose tokens
+	// disjoint — a marker's bytes must never be counted in both.
+	prose := append([]byte(nil), doc...)
+
 	for i := 0; i < len(doc); {
 		matched := 0
 		for _, mk := range constraintMarkers {
@@ -34,15 +40,16 @@ func DConst(doc []byte) internal.DConstResult {
 		}
 		if matched > 0 {
 			res.ConstraintMarkers++
+			for k := i; k < i+matched; k++ {
+				prose[k] = ' '
+			}
 			i += matched
 			continue
 		}
 		i++
 	}
 
-	// Words counted independently of marker scan: a marker inside a line
-	// still leaves surrounding prose as prose.
-	res.ProseTokens = len(bytes.Fields(doc))
+	res.ProseTokens = len(bytes.Fields(prose))
 
 	if total := res.ConstraintMarkers + res.ProseTokens; total > 0 {
 		res.Value = float64(res.ConstraintMarkers) / float64(total)
