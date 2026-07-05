@@ -56,6 +56,67 @@ func TestLoadNonExistentPath(t *testing.T) {
 	}
 }
 
+func TestLoadSkipsDotAndUnderscorePrefixedDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	normal := filepath.Join(dir, "normal")
+	hidden := filepath.Join(dir, ".hidden")
+	skip := filepath.Join(dir, "_skip")
+	for _, d := range []string{normal, hidden, skip} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, filepath.Join(normal, "included.md"), "included")
+	writeFile(t, filepath.Join(hidden, "excluded.md"), "excluded")
+	writeFile(t, filepath.Join(skip, "excluded.md"), "excluded")
+
+	specs, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("want 1 spec (hidden/underscore dirs excluded), got %d: %+v", len(specs), specs)
+	}
+	want := filepath.Join(normal, "included.md")
+	if specs[0].Path != want {
+		t.Fatalf("want spec path %s, got %s", want, specs[0].Path)
+	}
+}
+
+func TestLoadDotPrefixedRootIsNotExcluded(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, ".myspecs")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "spec.md"), "spec")
+
+	specs, err := Load(root)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("want 1 spec (dot-prefixed root must not be excluded), got %d: %+v", len(specs), specs)
+	}
+}
+
+func TestLoadSingleDotfileIsNotExcluded(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".hidden.md")
+	if err := os.WriteFile(path, []byte("# Hidden"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	specs, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(specs) != 1 || specs[0].Path != path || string(specs[0].Content) != "# Hidden" {
+		t.Fatalf("want 1 spec matching %s, got %+v", path, specs)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
