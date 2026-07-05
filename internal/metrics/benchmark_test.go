@@ -69,7 +69,8 @@ func BenchmarkCheck1MB(b *testing.B) {
 // enforced CI gate rather than a number a human has to eyeball in
 // `go test -bench` output (issue #67): a `check` pass on a 1MB corpus
 // must stay well within the 100ms target. The ceiling is deliberately
-// generous — ~25x the ~19ms observed on typical dev hardware — to absorb
+// generous — ~30x the ~17ms observed on typical dev hardware (see
+// BenchmarkCheck1MB/REQ-NFR-01) — to absorb
 // slower/noisier CI runners without becoming flaky, while still catching
 // a genuine multi-fold regression (e.g. an accidental return to O(n^2)
 // scanning, or K_drift's allocation-flat rewrite from #66 regressing).
