@@ -17,8 +17,13 @@ import (
 	"github.com/valpere/tumanomir/internal/spec"
 )
 
+// version is printed by the `version` subcommand and `-h`/`--help`/`help`.
+// Bump alongside any user-visible CLI or behavior change.
 const version = "0.1.0-dev"
 
+// usage is both the `-h`/`--help`/`help` output and the no-arguments error
+// message — a single source of truth for the CLI's documented surface so
+// the two presentations (help vs. error) can never drift apart.
 const usage = `tumanomir — specification-precision measurement for AI projects
 
 Usage:
@@ -77,6 +82,12 @@ func dispatch(args []string) int {
 	}
 }
 
+// runCheck implements the `check` subcommand: the deterministic layer
+// (K_drift, D_const) — zero network, zero LLM. Parses flags, loads the
+// spec(s) via spec.Load, delegates to aggregate for the pure metric
+// computation, then prints the report. Returns the process exit code
+// (0 pass, 1 gate failed, 2 error) rather than calling os.Exit directly,
+// so it's directly testable (see main_test.go's TestRunCheck* tests).
 func runCheck(args []string) int {
 	th := internal.DefaultThresholds()
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
@@ -123,10 +134,10 @@ func runCheck(args []string) int {
 //
 // TODO(REQ-OUT-01): move to internal/report once that package exists
 type checkResult struct {
-	KD        internal.KDriftResult
-	DC        internal.DConstResult
-	KDVerdict internal.Verdict
-	DCVerdict internal.Verdict
+	KD        internal.KDriftResult // deterministic traceability metric, aggregated across all specs
+	DC        internal.DConstResult // deterministic lexical constraint-density metric, aggregated
+	KDVerdict internal.Verdict      // gates the exit code (VerdictBlock -> exit 1)
+	DCVerdict internal.Verdict      // VerdictOK or VerdictWarn; advisory only, never gates the exit code
 }
 
 // aggregate combines K_drift and D_const across specs so a multi-file
@@ -207,8 +218,16 @@ const promptEstimateDivergenceFactor = 1.5
 //
 // TODO(REQ-OUT-01): move to internal/report once that package exists
 type measureResult struct {
-	Dispersion   internal.DispersionResult
-	Config       internal.InstrumentConfig
+	// Dispersion is the raw D_pair/H/H_norm computation from
+	// dispersion.Analyze over the run's surviving valid samples.
+	Dispersion internal.DispersionResult
+	// Config is the instrument configuration this run measured under —
+	// printed verbatim in the report per REQ-MSR-04's instrument-relative
+	// reporting requirement.
+	Config internal.InstrumentConfig
+	// DPairVerdict gates the exit code (VerdictBlock -> exit 1); may also
+	// be VerdictSkipped if too many discards left fewer than 2 valid
+	// samples to compare.
 	DPairVerdict internal.Verdict
 	DiscardRate  float64 // Discarded / (Discarded + N), 0 if no attempts made
 	DiscardWarn  bool    // DiscardRate > 0.40 (REQ-MSR-05's hypothesis threshold)

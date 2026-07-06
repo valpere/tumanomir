@@ -9,9 +9,18 @@ import (
 	"github.com/valpere/tumanomir/internal"
 )
 
+// Byte-slice constants for the hand-written scanners below. Declared once
+// as package-level vars (not per-call literals) so findReqTag/hasEdgeMarker
+// don't re-allocate a fresh []byte on every scan.
 var (
+	// reqTagPrefix is the literal opening of a requirement tag, e.g. the
+	// "[REQ-" in "[REQ-A-01]".
 	reqTagPrefix = []byte("[REQ-")
-	edgeArrow    = []byte("->")
+	// edgeArrow is the trace-edge marker's literal arrow, "->".
+	edgeArrow = []byte("->")
+	// edgePrefixes are the three valid trace-edge target kinds a "->" must
+	// be followed by (after optional whitespace) to count as tracing a
+	// requirement: functional, logging, or physical.
 	edgePrefixes = [][]byte{[]byte("[FUN-"), []byte("[LOG-"), []byte("[PHY-")}
 )
 

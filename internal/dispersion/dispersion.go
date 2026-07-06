@@ -11,6 +11,14 @@ import (
 // caller before Analyze (the generation loop retries them and counts
 // discards); passing an unparseable source here yields ok=false pairs
 // with zero similarity, which would skew the result — don't.
+//
+// Algorithm, in order: (1) extract each source's AST feature vector,
+// dropping any that don't parse; (2) if fewer than 2 valid sources remain,
+// there is no pair to compare — return early with just N populated;
+// (3) compute the full pairwise cosine-similarity matrix; (4) MeanSim/DPair
+// come directly off that matrix, independent of simThreshold; (5) H/HNorm
+// additionally cluster the matrix at simThreshold and take entropy over
+// cluster sizes — this is the only place simThreshold affects the result.
 func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 	res := internal.DispersionResult{SimThresh: simThreshold}
 
@@ -25,9 +33,18 @@ func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 	n := len(feats)
 	res.N = n
 	if n < 2 {
+		// Fewer than 2 valid samples means zero pairs to compare — MeanSim,
+		// DPair, H, HNorm all stay at their zero value rather than being
+		// computed from a degenerate (empty or single-element) matrix,
+		// which would otherwise divide by zero (pairs==0) or take
+		// log2(1)==0 as HNorm's denominator.
 		return res
 	}
 
+	// sims is the full symmetric N×N pairwise similarity matrix (diagonal
+	// left at its zero value — a sample's similarity to itself is never
+	// read by anything downstream). Built once and reused by both the
+	// MeanSim/DPair sum below and singleLinkage's clustering.
 	sims := make([][]float64, n)
 	for i := range sims {
 		sims[i] = make([]float64, n)
@@ -46,13 +63,20 @@ func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 	res.MeanSim = sum / float64(pairs)
 	res.DPair = 1 - res.MeanSim
 	res.H, res.Clusters = entropy(singleLinkage(sims, simThreshold))
+	// HNorm normalizes H by the maximum possible entropy for N samples
+	// (all N in separate singleton clusters, i.e. log2(N) bits) so H
+	// values are comparable across runs with different N — raw H alone
+	// saturates at log2(N) and so can't be compared directly between e.g.
+	// an N=10 and an N=20 run.
 	res.HNorm = res.H / math.Log2(float64(n))
 	return res
 }
 
 // ValidGo reports whether src parses as a Go file with at least one
 // extractable feature. Used by the generation loop to count invalid
-// samples before retrying.
+// samples before retrying (REQ-MSR-05) — a thin public wrapper so callers
+// outside this package never need the feature map itself, just the
+// pass/fail signal.
 func ValidGo(src []byte) bool {
 	_, ok := features(src)
 	return ok
