@@ -209,8 +209,12 @@ func TestLoadSingleFileReadPermissionDenied(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 	t.Cleanup(func() {
+		// t.Errorf, not t.Fatalf: FailNow calls runtime.Goexit, which would
+		// abort this goroutine mid-cleanup and skip every cleanup registered
+		// before this one (including t.TempDir's own removal) — the exact
+		// hazard this restore exists to avoid, via a different mechanism.
 		if err := os.Chmod(path, 0o644); err != nil {
-			t.Fatalf("restore chmod: %v", err)
+			t.Errorf("restore chmod: %v", err)
 		}
 	})
 
@@ -245,8 +249,10 @@ func TestLoadWalkDirUnreadableSubdirectory(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 	t.Cleanup(func() {
+		// t.Errorf, not t.Fatalf: see the comment in
+		// TestLoadSingleFileReadPermissionDenied's cleanup.
 		if err := os.Chmod(sub, 0o755); err != nil {
-			t.Fatalf("restore chmod: %v", err)
+			t.Errorf("restore chmod: %v", err)
 		}
 	})
 
@@ -274,8 +280,10 @@ func TestLoadWalkDirFileReadPermissionDenied(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 	t.Cleanup(func() {
+		// t.Errorf, not t.Fatalf: see the comment in
+		// TestLoadSingleFileReadPermissionDenied's cleanup.
 		if err := os.Chmod(path, 0o644); err != nil {
-			t.Fatalf("restore chmod: %v", err)
+			t.Errorf("restore chmod: %v", err)
 		}
 	})
 
