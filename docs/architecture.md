@@ -79,15 +79,18 @@ internal/spec/          завантаження markdown-специфікаці
 internal/metrics/       K_drift (лінтер трасування), D_const (лексичний сканер)
 internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair
 internal/instrument/    інтерфейс Generator, Ollama-бекенд, PromptV1 + фрейм-екстрактор
+internal/report/        рендеринг CheckResult/MeasureResult у TTY-звіт (REQ-OUT-01)
 ```
 
 `internal/instrument` — єдиний пакет, якому дозволено мережу
 (`internal/nonetwork_test.go` рантайм-перевіряє, що `internal/metrics` і
 `internal/spec` цього не порушують — REQ-CHK-05).
 
-Рендеринг звітів (`checkResult`/`measureResult`) зараз інлайновий у
-`cmd/tumanomir/main.go`, позначений `TODO(REQ-OUT-01)` — винесення в
-окремий `internal/report/` заплановане, див. roadmap.
+Рендеринг звітів винесено в `internal/report` (`RenderCheck`/`RenderMeasure`,
+issue #82): пакет залежить лише від `internal`, ніколи від
+`internal/metrics`/`internal/spec` — `aggregate()` (агрегація по файлах)
+лишається в `cmd/tumanomir`, у `internal/report` переїхав тільки тип
+`CheckResult`, який вона повертає.
 
 Походження коду dispersion: порт `docs/investigation/_sanity/analyze/main.go`
 з експерименту статті.

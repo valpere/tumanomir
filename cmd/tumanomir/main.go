@@ -14,6 +14,7 @@ import (
 	"github.com/valpere/tumanomir/internal/dispersion"
 	"github.com/valpere/tumanomir/internal/instrument"
 	"github.com/valpere/tumanomir/internal/metrics"
+	"github.com/valpere/tumanomir/internal/report"
 	"github.com/valpere/tumanomir/internal/spec"
 )
 
@@ -108,19 +109,7 @@ func runCheck(args []string) int {
 
 	cr := aggregate(specs, th)
 
-	if cr.KDVerdict == internal.VerdictSkipped {
-		fmt.Printf("  K_drift:  —     [n/a]%s(no [REQ-*] tags found)\n", pad(cr.KDVerdict))
-	} else {
-		fmt.Printf("  K_drift:  %.2f  [%s]%s(threshold %.2f, %d/%d requirements untraced)\n",
-			cr.KD.Value, cr.KDVerdict, pad(cr.KDVerdict), th.KDriftMax, cr.KD.Hanging, cr.KD.Requirements)
-	}
-	fmt.Printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
-		cr.DC.Value, cr.DCVerdict, pad(cr.DCVerdict), th.DConstMin, cr.DC.ConstraintMarkers, cr.DC.ProseTokens)
-	fmt.Printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)\n")
-
-	for _, id := range cr.KD.HangingIDs {
-		fmt.Printf("    hanging: %s\n", id)
-	}
+	report.RenderCheck(os.Stdout, cr, th)
 
 	if cr.KDVerdict == internal.VerdictBlock {
 		fmt.Println("\nexit code: 1 (gate failed)")
@@ -129,22 +118,11 @@ func runCheck(args []string) int {
 	return 0
 }
 
-// checkResult holds the deterministic layer's aggregated metric values and
-// their gate verdicts, computed by aggregate.
-//
-// TODO(REQ-OUT-01): move to internal/report once that package exists
-type checkResult struct {
-	KD        internal.KDriftResult // deterministic traceability metric, aggregated across all specs
-	DC        internal.DConstResult // deterministic lexical constraint-density metric, aggregated
-	KDVerdict internal.Verdict      // gates the exit code (VerdictBlock -> exit 1)
-	DCVerdict internal.Verdict      // VerdictOK or VerdictWarn; advisory only, never gates the exit code
-}
-
 // aggregate combines K_drift and D_const across specs so a multi-file
 // corpus is judged as one source of truth, then computes gate verdicts
 // against th. Per-file hanging requirement IDs are prefixed with their
 // source path for actionable output.
-func aggregate(specs []spec.Spec, th internal.Thresholds) checkResult {
+func aggregate(specs []spec.Spec, th internal.Thresholds) report.CheckResult {
 	var kd internal.KDriftResult
 	var dc internal.DConstResult
 	for _, s := range specs {
@@ -180,72 +158,11 @@ func aggregate(specs []spec.Spec, th internal.Thresholds) checkResult {
 		dcVerdict = internal.VerdictWarn // lexical proxy: advisory, not a gate
 	}
 
-	return checkResult{KD: kd, DC: dc, KDVerdict: kdVerdict, DCVerdict: dcVerdict}
+	return report.CheckResult{KD: kd, DC: dc, KDVerdict: kdVerdict, DCVerdict: dcVerdict}
 }
-
-// pad aligns verdict columns for ok/warn/block widths.
-func pad(v internal.Verdict) string {
-	switch v {
-	case internal.VerdictOK:
-		return "     "
-	case internal.VerdictWarn:
-		return "   "
-	case internal.VerdictSkipped:
-		return "    "
-	default:
-		return "  "
-	}
-}
-
-// discardWarnThreshold is REQ-MSR-05's hypothesis discard-rate threshold
-// above which the measure report must flag the run as potentially
-// unreliable. Stated here as a hypothesis, not a calibrated constant, the
-// same treatment given to the 0.20/0.35/0.30 thresholds in
-// internal.DefaultThresholds.
-const discardWarnThreshold = 0.40
 
 // maxAttemptsPerSample is 1 initial attempt + 2 retries, per REQ-MSR-05.
 const maxAttemptsPerSample = 3
-
-// promptEstimateDivergenceFactor flags a generation whose actual
-// PromptEvalCount exceeds the pre-flight byte/3 estimate by more than
-// this multiple — a signal the estimate under-counted (e.g. non-ASCII
-// input), not a calibrated constant. See issue #57.
-const promptEstimateDivergenceFactor = 1.5
-
-// measureResult holds the stochastic layer's aggregated metric values,
-// discard-rate warning state, and gate verdict.
-//
-// TODO(REQ-OUT-01): move to internal/report once that package exists
-type measureResult struct {
-	// Dispersion is the raw D_pair/H/H_norm computation from
-	// dispersion.Analyze over the run's surviving valid samples.
-	Dispersion internal.DispersionResult
-	// Config is the instrument configuration this run measured under —
-	// printed verbatim in the report per REQ-MSR-04's instrument-relative
-	// reporting requirement.
-	Config internal.InstrumentConfig
-	// DPairVerdict gates the exit code (VerdictBlock -> exit 1); may also
-	// be VerdictSkipped if too many discards left fewer than 2 valid
-	// samples to compare.
-	DPairVerdict internal.Verdict
-	DiscardRate  float64 // Discarded / (Discarded + N), 0 if no attempts made
-	DiscardWarn  bool    // DiscardRate > 0.40 (REQ-MSR-05's hypothesis threshold)
-	// Truncated is the count of accepted (valid) generations with
-	// DoneReason == instrument.DoneReasonLength (REQ-MSR-06). It lives
-	// here rather than on internal.DispersionResult because it's an
-	// instrument/generation-loop concept (which backend, why a
-	// generation stopped), not something dispersion.Analyze's pure
-	// AST-similarity computation has any business knowing about.
-	Truncated int
-	// PromptUnderestimated is the count of generations (valid or not)
-	// whose actual PromptEvalCount exceeded the pre-flight byte/3
-	// estimate by more than promptEstimateDivergenceFactor — the
-	// heuristic under-counts non-ASCII prompts, so this is a diagnostic
-	// signal that the preflight's "errs toward refusing" guarantee may
-	// not have held for this run (issue #57).
-	PromptUnderestimated int
-}
 
 // runMeasure parses flags, validates the positional spec-file argument,
 // constructs the real Ollama generator and delegates to
@@ -367,7 +284,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		return 2
 	}
 
-	printMeasureResult(mr, th)
+	report.RenderMeasure(os.Stdout, mr, th)
 
 	if mr.DPairVerdict == internal.VerdictBlock {
 		fmt.Println("\nexit code: 1 (gate failed)")
@@ -388,9 +305,9 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 // otherwise produce a misleading discard rate that looks like model
 // non-determinism. The caller (runMeasure) is expected to print the error
 // and exit 2. A nil error always comes with a fully populated
-// measureResult, even when valid samples < 2 (handled via DPairVerdict ==
-// internal.VerdictSkipped, not as an error).
-func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentConfig, specContent []byte, samples int, th internal.Thresholds) (measureResult, error) {
+// report.MeasureResult, even when valid samples < 2 (handled via
+// DPairVerdict == internal.VerdictSkipped, not as an error).
+func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentConfig, specContent []byte, samples int, th internal.Thresholds) (report.MeasureResult, error) {
 	prompt := instrument.BuildPrompt(specContent)
 
 	promptEstimate := instrument.EstimatePromptTokens(prompt)
@@ -404,13 +321,13 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 		for attempt := 0; attempt < maxAttemptsPerSample; attempt++ {
 			g, err := gen.Generate(context.Background(), prompt)
 			if err != nil {
-				return measureResult{}, fmt.Errorf("generation failed: %w", err)
+				return report.MeasureResult{}, fmt.Errorf("generation failed: %w", err)
 			}
 			// The byte/3 preflight estimate under-counts non-ASCII (e.g.
 			// Cyrillic) prompts; cross-check against the backend's actual
 			// count post-hoc, since a stdlib-only pre-flight fix isn't
 			// possible without a real tokenizer (issue #57).
-			if promptEstimate > 0 && float64(g.PromptEvalCount) > float64(promptEstimate)*promptEstimateDivergenceFactor {
+			if promptEstimate > 0 && float64(g.PromptEvalCount) > float64(promptEstimate)*internal.PromptEstimateDivergenceFactor {
 				underestimated++
 			}
 			block, ok := instrument.ExtractGoBlock(g.Text)
@@ -456,69 +373,13 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 		discardRate = float64(discarded) / float64(total)
 	}
 
-	return measureResult{
+	return report.MeasureResult{
 		Dispersion:           result,
 		Config:               cfg,
 		DPairVerdict:         dPairVerdict,
 		DiscardRate:          discardRate,
-		DiscardWarn:          discardRate > discardWarnThreshold,
+		DiscardWarn:          discardRate > internal.DiscardWarnThreshold,
 		Truncated:            truncated,
 		PromptUnderestimated: underestimated,
 	}, nil
-}
-
-// printMeasureResult renders REQ-MSR-04's instrument config, the
-// discard-rate and truncation warnings (if triggered), and the
-// D_pair/H/H_norm lines. H and H_norm are always printed as
-// ordinal/advisory signals — they never gate, per the methodological
-// invariant in CLAUDE.md.
-//
-// The discard-rate warning (REQ-MSR-05) and the truncation warning
-// (REQ-MSR-06) are printed as two separate lines rather than folded
-// together: they flag two distinct failure modes — generations that never
-// became valid Go at all (discarded, excluded from N) vs. generations that
-// parsed as valid Go but were cut off by num_predict (accepted into N, but
-// their AST may not reflect the model's full intended output). Merging the
-// two would blur which failure mode a reader needs to act on.
-func printMeasureResult(mr measureResult, th internal.Thresholds) {
-	cfg := mr.Config
-
-	if mr.DiscardWarn {
-		fmt.Printf("⚠ discard rate: %.0f%% (%d/%d generations invalid) — exceeds the %.0f%% hypothesis threshold (REQ-MSR-05); results may be unreliable\n\n",
-			mr.DiscardRate*100, mr.Dispersion.Discarded, mr.Dispersion.Discarded+mr.Dispersion.N, discardWarnThreshold*100)
-	}
-
-	if mr.Truncated > 0 {
-		fmt.Printf("⚠ %d/%d accepted generations had done_reason=length (truncated by num_predict) — their AST may not reflect the model's full intended output; consider raising --num-predict\n\n",
-			mr.Truncated, mr.Dispersion.N)
-	}
-
-	if mr.PromptUnderestimated > 0 {
-		fmt.Printf("⚠ %d generation(s) had an actual prompt-token count over %.1fx the preflight estimate — the byte/3 heuristic under-counts non-ASCII (e.g. Cyrillic) prompts and may not have caught a real truncation risk; verify --num-ctx has enough headroom\n\n",
-			mr.PromptUnderestimated, promptEstimateDivergenceFactor)
-	}
-
-	fmt.Println("Instrument config (REQ-MSR-04):")
-	fmt.Printf("  backend:        %s\n", cfg.Backend)
-	fmt.Printf("  model:          %s\n", cfg.Model)
-	fmt.Printf("  temperature:    %.2f\n", cfg.Temperature)
-	fmt.Printf("  samples (N):    %d\n", cfg.Samples)
-	fmt.Printf("  think:          %t\n", cfg.Think)
-	fmt.Printf("  num_ctx:        %d\n", cfg.NumCtx)
-	fmt.Printf("  num_predict:    %d\n", cfg.NumPredict)
-	fmt.Printf("  sim_threshold:  %.2f\n", cfg.SimThreshold)
-	fmt.Printf("  prompt:         %s (%d bytes)\n\n", cfg.PromptVersion, len(cfg.Prompt))
-
-	if mr.DPairVerdict == internal.VerdictSkipped {
-		fmt.Printf("  D_pair:   —     [%s]%s(only %d valid sample(s); need >=2 to compute pairwise similarity)\n",
-			internal.VerdictSkipped, pad(internal.VerdictSkipped), mr.Dispersion.N)
-		fmt.Printf("  H:        —     [%s]%s(ordinal signal only, not gated)\n", internal.VerdictSkipped, pad(internal.VerdictSkipped))
-		fmt.Printf("  H_norm:   —     [%s]%s(ordinal signal only, not gated)\n", internal.VerdictSkipped, pad(internal.VerdictSkipped))
-		return
-	}
-
-	fmt.Printf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)\n",
-		mr.Dispersion.DPair, mr.DPairVerdict, pad(mr.DPairVerdict), th.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
-	fmt.Printf("  H:        %.2f  bits (ordinal signal only, not gated)\n", mr.Dispersion.H)
-	fmt.Printf("  H_norm:   %.2f  (ordinal signal only, not gated)\n", mr.Dispersion.HNorm)
 }
