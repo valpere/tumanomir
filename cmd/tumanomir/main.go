@@ -109,7 +109,10 @@ func runCheck(args []string) int {
 
 	cr := aggregate(specs, th)
 
-	report.RenderCheck(os.Stdout, cr, th)
+	if err := report.RenderCheck(os.Stdout, cr, th); err != nil {
+		fmt.Fprintln(os.Stderr, "check:", err)
+		return 2
+	}
 
 	if cr.KDVerdict == internal.VerdictBlock {
 		fmt.Println("\nexit code: 1 (gate failed)")
@@ -284,7 +287,10 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		return 2
 	}
 
-	report.RenderMeasure(os.Stdout, mr, th)
+	if err := report.RenderMeasure(os.Stdout, mr, th); err != nil {
+		fmt.Fprintln(os.Stderr, "measure:", err)
+		return 2
+	}
 
 	if mr.DPairVerdict == internal.VerdictBlock {
 		fmt.Println("\nexit code: 1 (gate failed)")

@@ -172,8 +172,8 @@ for exactly that reason.
     judged against. Ordinal signals (H, H_norm) are printed without a
     verdict/threshold column, since they never gate (REQ-MSR-02).
     -> [FUN-OUT-01] internal/report.RenderCheck(w io.Writer, r CheckResult,
-       th Thresholds) and internal/report.RenderMeasure(w io.Writer,
-       r MeasureResult, th Thresholds), called from cmd/tumanomir's
+       th Thresholds) error and internal/report.RenderMeasure(w io.Writer,
+       r MeasureResult, th Thresholds) error, called from cmd/tumanomir's
        runCheck/runMeasureImpl. A unified report.Render(w, Report) over
        the single @schema Report shape above stays future work for the
        `gate` command (see roadmap) — check and measure currently render

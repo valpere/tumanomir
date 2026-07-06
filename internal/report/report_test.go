@@ -19,7 +19,9 @@ func TestRenderMeasureDiscardWarningVisibility(t *testing.T) {
 		DiscardWarn: true,
 	}
 	var buf bytes.Buffer
-	RenderMeasure(&buf, warnMR, testThresholds)
+	if err := RenderMeasure(&buf, warnMR, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 	if !strings.Contains(out, "discard rate") {
 		t.Fatalf("want a discard-rate warning line for DiscardWarn=true, got:\n%s", out)
@@ -28,7 +30,9 @@ func TestRenderMeasureDiscardWarningVisibility(t *testing.T) {
 	noWarnMR := warnMR
 	noWarnMR.DiscardWarn = false
 	buf.Reset()
-	RenderMeasure(&buf, noWarnMR, testThresholds)
+	if err := RenderMeasure(&buf, noWarnMR, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out = buf.String()
 	if strings.Contains(out, "discard rate") {
 		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
@@ -46,7 +50,9 @@ func TestRenderMeasureTruncationWarningVisibility(t *testing.T) {
 		Truncated:  3,
 	}
 	var buf bytes.Buffer
-	RenderMeasure(&buf, truncMR, testThresholds)
+	if err := RenderMeasure(&buf, truncMR, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 	wantWarn := "3/10 accepted generations had done_reason=length"
 	if !strings.Contains(out, wantWarn) {
@@ -56,7 +62,9 @@ func TestRenderMeasureTruncationWarningVisibility(t *testing.T) {
 	noTruncMR := truncMR
 	noTruncMR.Truncated = 0
 	buf.Reset()
-	RenderMeasure(&buf, noTruncMR, testThresholds)
+	if err := RenderMeasure(&buf, noTruncMR, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out = buf.String()
 	if strings.Contains(out, "done_reason=length") {
 		t.Fatalf("must not print the truncation warning when Truncated=0, got:\n%s", out)
@@ -76,7 +84,9 @@ func TestRenderMeasurePromptUnderestimateWarningVisibility(t *testing.T) {
 		PromptUnderestimated: 4,
 	}
 	var buf bytes.Buffer
-	RenderMeasure(&buf, underMR, testThresholds)
+	if err := RenderMeasure(&buf, underMR, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 	wantWarn := "4 generation(s) had an actual prompt-token count"
 	if !strings.Contains(out, wantWarn) {
@@ -86,7 +96,9 @@ func TestRenderMeasurePromptUnderestimateWarningVisibility(t *testing.T) {
 	noneMR := underMR
 	noneMR.PromptUnderestimated = 0
 	buf.Reset()
-	RenderMeasure(&buf, noneMR, testThresholds)
+	if err := RenderMeasure(&buf, noneMR, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out = buf.String()
 	if strings.Contains(out, "preflight estimate") {
 		t.Fatalf("must not print the prompt-underestimate warning when PromptUnderestimated=0, got:\n%s", out)
@@ -127,7 +139,9 @@ func TestRenderMeasureOKVerdict(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderMeasure(&buf, mr, testThresholds)
+	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 
 	if strings.Contains(out, "discard rate") {
@@ -191,7 +205,9 @@ func TestRenderMeasurePromptVersionIsNotHardcoded(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderMeasure(&buf, mr, testThresholds)
+	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 
 	want := "  prompt:         TotallyDifferentXYZ (3 bytes)"
@@ -235,7 +251,9 @@ func TestRenderMeasureBlockVerdict(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderMeasure(&buf, mr, testThresholds)
+	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 
 	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
@@ -290,7 +308,9 @@ func TestRenderMeasureSkippedVerdict(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderMeasure(&buf, mr, testThresholds)
+	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
 	out := buf.String()
 
 	wantDPair := fmt.Sprintf("  D_pair:   —     [%s]%s(only %d valid sample(s); need >=2 to compute pairwise similarity)",
