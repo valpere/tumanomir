@@ -56,6 +56,19 @@ func DefaultThresholds() Thresholds {
 	return Thresholds{KDriftMax: 0.20, DConstMin: 0.35, DPairMax: 0.30}
 }
 
+// DiscardWarnThreshold is REQ-MSR-05's hypothesis discard-rate threshold
+// above which the measure report must flag the run as potentially
+// unreliable. Stated here as a hypothesis, not a calibrated constant, the
+// same treatment given to the 0.20/0.35/0.30 thresholds in
+// DefaultThresholds.
+const DiscardWarnThreshold = 0.40
+
+// PromptEstimateDivergenceFactor flags a generation whose actual
+// PromptEvalCount exceeds the pre-flight byte/3 estimate by more than this
+// multiple — a signal the estimate under-counted (e.g. non-ASCII input),
+// not a calibrated constant. See issue #57.
+const PromptEstimateDivergenceFactor = 1.5
+
 // KDriftResult is the deterministic-layer traceability metric: what
 // fraction of a spec's requirements have no downstream trace edge at all.
 // Produced by internal/metrics.KDrift from a pure byte scan — no LLM, no

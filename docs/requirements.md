@@ -171,9 +171,13 @@ for exactly that reason.
     with value, verdict (ok/warn/block/skipped) and the threshold it was
     judged against. Ordinal signals (H, H_norm) are printed without a
     verdict/threshold column, since they never gate (REQ-MSR-02).
-    -> [FUN-OUT-01] currently inline in cmd/tumanomir/main.go
-       (printMeasureResult and the check renderer); extraction into a
-       report.Render(w io.Writer, r Report) is planned — see roadmap
+    -> [FUN-OUT-01] internal/report.RenderCheck(w io.Writer, r CheckResult,
+       th Thresholds) error and internal/report.RenderMeasure(w io.Writer,
+       r MeasureResult, th Thresholds) error, called from cmd/tumanomir's
+       runCheck/runMeasureImpl. A unified report.Render(w, Report) over
+       the single @schema Report shape above stays future work for the
+       `gate` command (see roadmap) — check and measure currently render
+       structurally different content.
 
 14. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
     failed, 2 = execution error. CI-composable by construction.

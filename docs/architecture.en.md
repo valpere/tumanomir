@@ -80,15 +80,18 @@ internal/spec/          markdown specification loading (file or directory)
 internal/metrics/       K_drift (traceability linter), D_const (lexical scanner)
 internal/dispersion/    AST features, cosine, single-linkage, entropy, D_pair
 internal/instrument/    Generator interface, Ollama backend, PromptV1 + fence extractor
+internal/report/        renders CheckResult/MeasureResult into a TTY report (REQ-OUT-01)
 ```
 
 `internal/instrument` is the only package allowed to make network calls
 (`internal/nonetwork_test.go` runtime-verifies that `internal/metrics` and
 `internal/spec` don't violate this — REQ-CHK-05).
 
-Report rendering (`checkResult`/`measureResult`) is currently inline in
-`cmd/tumanomir/main.go`, marked `TODO(REQ-OUT-01)` — extracting it into a
-dedicated `internal/report/` package is planned, see the roadmap.
+Report rendering has been extracted into `internal/report`
+(`RenderCheck`/`RenderMeasure`, issue #82): the package depends only on
+`internal`, never on `internal/metrics`/`internal/spec` — `aggregate()`
+(the per-file aggregation logic) stays in `cmd/tumanomir`; only the
+`CheckResult` type it returns moved into `internal/report`.
 
 Origin of the dispersion code: a port of
 `docs/investigation/_sanity/analyze/main.go` from the article's experiment.
