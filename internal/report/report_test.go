@@ -1,7 +1,6 @@
 package report
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +10,19 @@ import (
 
 var testThresholds = internal.DefaultThresholds()
 
+// mustRenderMeasure renders mr and fails the test on any write error —
+// bytes.Buffer's Write never actually fails, so this should always
+// succeed; the check exists for lint-cleanliness and future-proofing if
+// RenderMeasure's contract ever changes.
+func mustRenderMeasure(t *testing.T, mr MeasureResult) string {
+	t.Helper()
+	var buf strings.Builder
+	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
+		t.Fatalf("RenderMeasure: %v", err)
+	}
+	return buf.String()
+}
+
 func TestRenderMeasureDiscardWarningVisibility(t *testing.T) {
 	warnMR := MeasureResult{
 		Dispersion:  internal.DispersionResult{N: 2, Discarded: 8},
@@ -18,22 +30,14 @@ func TestRenderMeasureDiscardWarningVisibility(t *testing.T) {
 		DiscardRate: 0.8,
 		DiscardWarn: true,
 	}
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, warnMR, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, warnMR)
 	if !strings.Contains(out, "discard rate") {
 		t.Fatalf("want a discard-rate warning line for DiscardWarn=true, got:\n%s", out)
 	}
 
 	noWarnMR := warnMR
 	noWarnMR.DiscardWarn = false
-	buf.Reset()
-	if err := RenderMeasure(&buf, noWarnMR, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out = buf.String()
+	out = mustRenderMeasure(t, noWarnMR)
 	if strings.Contains(out, "discard rate") {
 		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
 	}
@@ -49,11 +53,7 @@ func TestRenderMeasureTruncationWarningVisibility(t *testing.T) {
 		Config:     internal.InstrumentConfig{Backend: "ollama", Model: "test"},
 		Truncated:  3,
 	}
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, truncMR, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, truncMR)
 	wantWarn := "3/10 accepted generations had done_reason=length"
 	if !strings.Contains(out, wantWarn) {
 		t.Fatalf("want a truncation warning line containing %q for Truncated=3, got:\n%s", wantWarn, out)
@@ -61,11 +61,7 @@ func TestRenderMeasureTruncationWarningVisibility(t *testing.T) {
 
 	noTruncMR := truncMR
 	noTruncMR.Truncated = 0
-	buf.Reset()
-	if err := RenderMeasure(&buf, noTruncMR, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out = buf.String()
+	out = mustRenderMeasure(t, noTruncMR)
 	if strings.Contains(out, "done_reason=length") {
 		t.Fatalf("must not print the truncation warning when Truncated=0, got:\n%s", out)
 	}
@@ -83,11 +79,7 @@ func TestRenderMeasurePromptUnderestimateWarningVisibility(t *testing.T) {
 		Config:               internal.InstrumentConfig{Backend: "ollama", Model: "test"},
 		PromptUnderestimated: 4,
 	}
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, underMR, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, underMR)
 	wantWarn := "4 generation(s) had an actual prompt-token count"
 	if !strings.Contains(out, wantWarn) {
 		t.Fatalf("want a prompt-underestimate warning line containing %q for PromptUnderestimated=4, got:\n%s", wantWarn, out)
@@ -95,11 +87,7 @@ func TestRenderMeasurePromptUnderestimateWarningVisibility(t *testing.T) {
 
 	noneMR := underMR
 	noneMR.PromptUnderestimated = 0
-	buf.Reset()
-	if err := RenderMeasure(&buf, noneMR, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out = buf.String()
+	out = mustRenderMeasure(t, noneMR)
 	if strings.Contains(out, "preflight estimate") {
 		t.Fatalf("must not print the prompt-underestimate warning when PromptUnderestimated=0, got:\n%s", out)
 	}
@@ -138,11 +126,7 @@ func TestRenderMeasureOKVerdict(t *testing.T) {
 		DiscardWarn:  false,
 	}
 
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, mr)
 
 	if strings.Contains(out, "discard rate") {
 		t.Fatalf("must not print the discard-rate warning when DiscardWarn=false, got:\n%s", out)
@@ -204,11 +188,7 @@ func TestRenderMeasurePromptVersionIsNotHardcoded(t *testing.T) {
 		DPairVerdict: internal.VerdictOK,
 	}
 
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, mr)
 
 	want := "  prompt:         TotallyDifferentXYZ (3 bytes)"
 	if !strings.Contains(out, want) {
@@ -250,11 +230,7 @@ func TestRenderMeasureBlockVerdict(t *testing.T) {
 		DiscardWarn:  false,
 	}
 
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, mr)
 
 	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
 		mr.Dispersion.DPair, internal.VerdictBlock, pad(internal.VerdictBlock), testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
@@ -307,11 +283,7 @@ func TestRenderMeasureSkippedVerdict(t *testing.T) {
 		DiscardWarn: false,
 	}
 
-	var buf bytes.Buffer
-	if err := RenderMeasure(&buf, mr, testThresholds); err != nil {
-		t.Fatalf("RenderMeasure: %v", err)
-	}
-	out := buf.String()
+	out := mustRenderMeasure(t, mr)
 
 	wantDPair := fmt.Sprintf("  D_pair:   —     [%s]%s(only %d valid sample(s); need >=2 to compute pairwise similarity)",
 		internal.VerdictSkipped, pad(internal.VerdictSkipped), mr.Dispersion.N)
