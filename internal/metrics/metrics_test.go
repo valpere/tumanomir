@@ -116,6 +116,19 @@ func TestKDriftMalformedTagThenValidTag(t *testing.T) {
 	}
 }
 
+// TestKDriftNonMatchingArrowThenValidEdge guards hasEdgeMarker's
+// retry-continuation (kdrift.go line 99): a "->" that doesn't lead to a
+// valid FUN-/LOG-/PHY- marker must not stop the scan — a genuine edge
+// marker later in the same block must still be found. Without this
+// branch working, a correctly-traced requirement would be misreported
+// as hanging, corrupting K_drift, a gate metric (issue #71).
+func TestKDriftNonMatchingArrowThenValidEdge(t *testing.T) {
+	res := KDrift([]byte("[REQ-A-01] see below -> nothing here\n-> [FUN-A-01]\n"))
+	if res.Requirements != 1 || res.Hanging != 0 {
+		t.Fatalf("want 1 req, 0 hanging (non-matching arrow skipped, later valid edge found); got %+v", res)
+	}
+}
+
 func TestDConstMarkersRaiseDensity(t *testing.T) {
 	fog := DConst([]byte("the system should flexibly accept transactions from various providers"))
 	sharp := DConst([]byte(tracedSpec))
