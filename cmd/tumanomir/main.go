@@ -47,23 +47,33 @@ Exit codes: 0 gates pass · 1 gate failed · 2 error.
 `
 
 func main() {
-	if len(os.Args) < 2 {
+	os.Exit(dispatch(os.Args[1:]))
+}
+
+// dispatch routes a top-level command (check/measure/version/help/unknown)
+// to its handler and returns the process exit code, mirroring the
+// runCheck/runMeasure separation-from-main pattern so the routing itself is
+// testable without a subprocess (issue #74).
+func dispatch(args []string) int {
+	if len(args) < 1 {
 		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		return 2
 	}
 
-	switch os.Args[1] {
+	switch args[0] {
 	case "check":
-		os.Exit(runCheck(os.Args[2:]))
+		return runCheck(args[1:])
 	case "measure":
-		os.Exit(runMeasure(os.Args[2:]))
+		return runMeasure(args[1:])
 	case "version":
 		fmt.Println("tumanomir", version)
+		return 0
 	case "-h", "--help", "help":
 		fmt.Print(usage)
+		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
-		os.Exit(2)
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
+		return 2
 	}
 }
 

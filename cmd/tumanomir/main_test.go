@@ -128,6 +128,128 @@ func TestRunCheckWithRequirementsIsNumeric(t *testing.T) {
 	}
 }
 
+// TestRunCheckHangingIDsPrinted guards runCheck's hanging-ID print loop
+// (main.go's "hanging: <id>" lines) through its own stdout, not just at the
+// lower aggregate() level (TestAggregate already covers the data; this
+// covers the rendering) — issue #74.
+func TestRunCheckHangingIDsPrinted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spec.md")
+	spec := "[REQ-X-01] traced\n-> [FUN-X-01] Do()\n[REQ-X-02] not traced\n"
+	if err := os.WriteFile(path, []byte(spec), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int { return runCheck([]string{path}) })
+
+	if code != 1 {
+		t.Fatalf("want exit code 1 (K_drift gate failed), got %d\noutput:\n%s", code, out)
+	}
+	want := "    hanging: " + path + ": REQ-X-02\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("want hanging-ID line %q, got output:\n%s", want, out)
+	}
+}
+
+// TestRunCheckArgCountValidation guards runCheck's "exactly one argument"
+// validation branch through its own exit code/stderr, mirroring
+// TestRunMeasureFlagValidation's style — no runCheck-level equivalent
+// existed before (issue #74).
+func TestRunCheckArgCountValidation(t *testing.T) {
+	errOut, code := captureStderr(t, func() int { return runCheck(nil) })
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestRunCheckSpecLoadFailure guards runCheck's spec.Load error branch — a
+// non-existent path must return 2 with an actionable stderr message
+// (issue #74).
+func TestRunCheckSpecLoadFailure(t *testing.T) {
+	errOut, code := captureStderr(t, func() int {
+		return runCheck([]string{filepath.Join(t.TempDir(), "does-not-exist.md")})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestDispatch covers dispatch's top-level command routing — the switch
+// previously lived directly in main() and called os.Exit inline, making it
+// untestable without a subprocess (issue #74).
+func TestDispatch(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	t.Run("check", func(t *testing.T) {
+		out, code := captureStdout(t, func() int { return dispatch([]string{"check", specPath}) })
+		if code != 0 {
+			t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "K_drift") {
+			t.Fatalf("want check output, got:\n%s", out)
+		}
+	})
+
+	t.Run("measure", func(t *testing.T) {
+		errOut, code := captureStderr(t, func() int { return dispatch([]string{"measure"}) })
+		if code != 2 {
+			t.Fatalf("code = %d, want 2 (missing --instrument); stderr:\n%s", code, errOut)
+		}
+	})
+
+	t.Run("version", func(t *testing.T) {
+		out, code := captureStdout(t, func() int { return dispatch([]string{"version"}) })
+		if code != 0 {
+			t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "tumanomir") {
+			t.Fatalf("want version output, got:\n%s", out)
+		}
+	})
+
+	for _, flag := range []string{"-h", "--help", "help"} {
+		t.Run("help_"+flag, func(t *testing.T) {
+			out, code := captureStdout(t, func() int { return dispatch([]string{flag}) })
+			if code != 0 {
+				t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+			}
+			if !strings.Contains(out, "Usage:") {
+				t.Fatalf("want usage output, got:\n%s", out)
+			}
+		})
+	}
+
+	t.Run("unknown command", func(t *testing.T) {
+		errOut, code := captureStderr(t, func() int { return dispatch([]string{"bogus"}) })
+		if code != 2 {
+			t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+		}
+		if !strings.Contains(errOut, `unknown command "bogus"`) {
+			t.Fatalf("want unknown-command message, got stderr:\n%s", errOut)
+		}
+	})
+
+	t.Run("no arguments", func(t *testing.T) {
+		errOut, code := captureStderr(t, func() int { return dispatch(nil) })
+		if code != 2 {
+			t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+		}
+		if !strings.Contains(errOut, "Usage:") {
+			t.Fatalf("want usage output, got stderr:\n%s", errOut)
+		}
+	})
+}
+
 // TestAggregate covers the aggregation+gating logic extracted from
 // runCheck at the spec.Spec -> checkResult level, without going through
 // file I/O or stdout capture (that's the runCheck-level tests above).
