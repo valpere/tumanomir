@@ -137,7 +137,7 @@ type checkResult struct {
 	KD        internal.KDriftResult // deterministic traceability metric, aggregated across all specs
 	DC        internal.DConstResult // deterministic lexical constraint-density metric, aggregated
 	KDVerdict internal.Verdict      // gates the exit code (VerdictBlock -> exit 1)
-	DCVerdict internal.Verdict      // advisory only (VerdictWarn), never gates the exit code
+	DCVerdict internal.Verdict      // VerdictOK or VerdictWarn; advisory only, never gates the exit code
 }
 
 // aggregate combines K_drift and D_const across specs so a multi-file
