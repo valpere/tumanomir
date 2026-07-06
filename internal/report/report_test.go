@@ -1,6 +1,7 @@
 package report
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,37 @@ import (
 )
 
 var testThresholds = internal.DefaultThresholds()
+
+// failingWriter fails every Write call with err — used to verify errWriter
+// (report.go) propagates a real write failure and stops after the first
+// one, rather than continuing to write against an already-broken io.Writer.
+type failingWriter struct {
+	err   error
+	calls int
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	w.calls++
+	return 0, w.err
+}
+
+// TestRenderCheckPropagatesWriteError guards errWriter's error path: no
+// existing test exercises what happens when the underlying io.Writer
+// fails, since every other test uses strings.Builder (whose Write never
+// fails). Asserts RenderCheck returns the write error and stops after
+// exactly one write attempt (fix-review, glm-5.1:cloud).
+func TestRenderCheckPropagatesWriteError(t *testing.T) {
+	wantErr := errors.New("boom")
+	fw := &failingWriter{err: wantErr}
+
+	err := RenderCheck(fw, CheckResult{KDVerdict: internal.VerdictOK, DCVerdict: internal.VerdictOK}, testThresholds)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RenderCheck() error = %v, want %v", err, wantErr)
+	}
+	if fw.calls != 1 {
+		t.Fatalf("want exactly 1 write attempt (errWriter must stop after the first error), got %d", fw.calls)
+	}
+}
 
 // mustRenderMeasure renders mr and fails the test on any write error —
 // bytes.Buffer's Write never actually fails, so this should always
