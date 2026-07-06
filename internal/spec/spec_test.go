@@ -184,3 +184,102 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestLoadSingleFileReadPermissionDenied guards Load's os.ReadFile error
+// path for a single-file argument (spec.go ~28-30): os.Stat succeeds (it
+// only needs traversal permission on parent directories, not read
+// permission on the file itself), but the subsequent os.ReadFile must fail
+// and propagate a non-nil error (issue #73).
+//
+// Skipped under root: permission bits don't apply to root, so this test
+// would silently no-op there rather than exercise the error path — some CI
+// environments run as root. Permissions are restored via t.Cleanup
+// registered after t.TempDir(), so it runs (LIFO) before TempDir's own
+// removal cleanup — an unreadable file could otherwise interfere with it.
+func TestLoadSingleFileReadPermissionDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission bits")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spec.md")
+	writeFile(t, path, "# Spec")
+
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("restore chmod: %v", err)
+		}
+	})
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("want error for a single file with read permission denied, got nil")
+	}
+}
+
+// TestLoadWalkDirUnreadableSubdirectory guards WalkDir's callback receiving
+// a non-nil err (spec.go ~38-40) — a subdirectory that can't be listed
+// during the walk (e.g. permission denied) must propagate as Load's
+// returned error (also exercising the outer `if err != nil` at ~59-61,
+// which is this same code path's only way to fire).
+//
+// Skipped under root: see TestLoadSingleFileReadPermissionDenied. The
+// subdirectory's permissions are restored before removal for the same
+// reason — an unreadable subdirectory would otherwise break t.TempDir's own
+// cleanup (RemoveAll needs to traverse into it).
+func TestLoadWalkDirUnreadableSubdirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permission bits")
+	}
+
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "locked")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(sub, "inside.md"), "inside")
+
+	if err := os.Chmod(sub, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(sub, 0o755); err != nil {
+			t.Fatalf("restore chmod: %v", err)
+		}
+	})
+
+	if _, err := Load(dir); err == nil {
+		t.Fatal("want error when a subdirectory can't be read during the walk, got nil")
+	}
+}
+
+// TestLoadWalkDirFileReadPermissionDenied guards Load's os.ReadFile error
+// path for a .md file discovered during a directory walk (spec.go ~53-55):
+// the file is listed successfully (its directory stays readable) but
+// reading its content must fail and propagate.
+//
+// Skipped under root: see TestLoadSingleFileReadPermissionDenied.
+func TestLoadWalkDirFileReadPermissionDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission bits")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "locked.md")
+	writeFile(t, path, "# Locked")
+
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("restore chmod: %v", err)
+		}
+	})
+
+	if _, err := Load(dir); err == nil {
+		t.Fatal("want error when a discovered .md file can't be read, got nil")
+	}
+}
