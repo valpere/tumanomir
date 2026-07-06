@@ -157,3 +157,109 @@ func Helper() {}
 		}
 	}
 }
+
+// TestFeaturesEmbeddedField guards astfeat.go's embedded (anonymous) struct
+// field branch (`if len(fld.Names) == 0 { add("embed:"...) }`), which no
+// existing fixture — not testSrcFoo/testSrcBar in cmd/tumanomir, not the
+// testdata/ corpus — exercises. REQ-MSR-01 names this file the authoritative
+// D_pair feature-vector implementation, so an untested key format here is a
+// direct regression risk to the primary stochastic gate metric (issue #72).
+func TestFeaturesEmbeddedField(t *testing.T) {
+	src := []byte(`package sample
+
+type Base struct {
+	ID int
+}
+
+type Wrapper struct {
+	Base
+	Name string
+}
+`)
+	got, ok := features(src)
+	if !ok {
+		t.Fatalf("expected valid Go source to yield features")
+	}
+	if got["embed:wrapper:base"] != 1 {
+		t.Fatalf(`want feature "embed:wrapper:base" == 1, got %v; got=%+v`, got["embed:wrapper:base"], got)
+	}
+	if got["field:wrapper:name:string"] != 1 {
+		t.Fatalf(`want named field "field:wrapper:name:string" == 1 alongside the embed, got %v; got=%+v`, got["field:wrapper:name:string"], got)
+	}
+}
+
+// TestFeaturesParseFailure guards features()'s parse-failure branch
+// (returns nil, false on unparseable input) directly within this package's
+// own suite — cmd/tumanomir exercises this indirectly via ValidGo, but not
+// internal/dispersion itself.
+func TestFeaturesParseFailure(t *testing.T) {
+	_, ok := features([]byte("not valid go source {{{"))
+	if ok {
+		t.Fatal("want ok=false for unparseable source")
+	}
+}
+
+// TestCosineEmptyVector guards cosine()'s zero-vector guard directly — not
+// reachable via Analyze, which filters !ok feature maps before any pair
+// reaches cosine, so this defensive path needs a direct call to lock in.
+func TestCosineEmptyVector(t *testing.T) {
+	nonEmpty := map[string]float64{"type:foo": 1}
+	if s := cosine(map[string]float64{}, nonEmpty); s != 0 {
+		t.Fatalf("cosine(empty, x) = %v, want 0", s)
+	}
+	if s := cosine(nonEmpty, map[string]float64{}); s != 0 {
+		t.Fatalf("cosine(x, empty) = %v, want 0", s)
+	}
+}
+
+// TestAnalyzeSkipsUnparseableSource guards Analyze's `!ok { continue }`
+// path (dispersion.go ~20-21): the doc comment says the generation loop
+// should have filtered unparseable sources already, but it's live code with
+// no direct test — an unparseable source among valid ones must not corrupt
+// the result for the valid ones.
+func TestAnalyzeSkipsUnparseableSource(t *testing.T) {
+	valid := []byte(`package sample
+
+type Foo struct {
+	X int
+}
+`)
+	sources := [][]byte{valid, []byte("not valid go {{{"), valid}
+	res := Analyze(sources, 0.95)
+	if res.N != 2 {
+		t.Fatalf("N = %d, want 2 (the unparseable source must be skipped, not counted); got %+v", res.N, res)
+	}
+	if diff := math.Abs(res.DPair); diff > simTol {
+		t.Fatalf("DPair = %v, want ~0 (tol %.3f; the two valid sources are byte-identical); got %+v", res.DPair, simTol, res)
+	}
+}
+
+// TestAnalyzeBelowTwoSources guards Analyze's `n < 2` early return
+// (dispersion.go ~27-29) directly — cmd/tumanomir exercises this indirectly
+// via TestRunMeasureWithGeneratorValidSamplesBelowTwoIsSkipped, not within
+// this package's own suite. Asserts N reflects the valid-source count and
+// no panic/bogus DPair occurs with 0 or 1 source.
+func TestAnalyzeBelowTwoSources(t *testing.T) {
+	valid := []byte(`package sample
+
+type Foo struct {
+	X int
+}
+`)
+
+	res0 := Analyze(nil, 0.95)
+	if res0.N != 0 {
+		t.Fatalf("N = %d, want 0 for zero sources; got %+v", res0.N, res0)
+	}
+	if res0.DPair != 0 {
+		t.Fatalf("DPair = %v, want 0 (zero value, not computed) for zero sources; got %+v", res0.DPair, res0)
+	}
+
+	res1 := Analyze([][]byte{valid}, 0.95)
+	if res1.N != 1 {
+		t.Fatalf("N = %d, want 1 for a single source; got %+v", res1.N, res1)
+	}
+	if res1.DPair != 0 {
+		t.Fatalf("DPair = %v, want 0 (zero value, not computed) for a single source; got %+v", res1.DPair, res1)
+	}
+}
