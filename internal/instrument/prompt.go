@@ -28,6 +28,9 @@ func BuildPrompt(specContent []byte) string {
 	return PromptV1 + "\n\n" + string(specContent)
 }
 
+// Exact-match fence line literals for ExtractGoBlock, declared once so the
+// scan below compares against a fixed []byte rather than re-slicing a
+// literal on every line.
 var (
 	goFenceOpen = []byte("```go")
 	fenceClose  = []byte("```")

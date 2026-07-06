@@ -17,6 +17,13 @@ type Spec struct {
 
 // Load reads a single markdown file, or all *.md files under a directory
 // (recursive). Implements REQ-CHK-04.
+//
+// Two distinct code paths, deliberately: a single-file argument is loaded
+// exactly as given, with no exclusion-rule filtering applied at all (see
+// isExcludedDir below) — an explicitly-named file is never second-guessed,
+// even if it happens to live inside a directory that would be skipped
+// during a directory walk. A directory argument is walked recursively,
+// collecting every *.md file found while pruning excluded subdirectories.
 func Load(path string) ([]Spec, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -35,6 +42,10 @@ func Load(path string) ([]Spec, error) {
 
 	var specs []Spec
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		// A non-nil err here means WalkDir itself couldn't stat/read this
+		// entry (e.g. permission denied) — propagate rather than skip
+		// silently, since a spec that failed to load must not be
+		// mistaken for a spec that simply doesn't exist.
 		if err != nil {
 			return err
 		}
@@ -60,6 +71,11 @@ func Load(path string) ([]Spec, error) {
 		return nil, err
 	}
 	if len(specs) == 0 {
+		// A directory with zero *.md files anywhere under it (after
+		// exclusions) is almost certainly a user error (wrong path,
+		// wrong extension) rather than a legitimate "empty corpus" —
+		// fail loudly instead of silently proceeding with a zero-spec
+		// aggregate result.
 		return nil, fmt.Errorf("no *.md files under %s", path)
 	}
 	return specs, nil

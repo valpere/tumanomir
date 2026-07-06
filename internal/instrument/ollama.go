@@ -30,6 +30,8 @@ const defaultTimeout = 5 * time.Minute
 // struct directly and rely on the zero-value defaults for
 // BaseURL/HTTPClient/Timeout.
 type Ollama struct {
+	// BaseURL is the Ollama server root, e.g. "http://localhost:11434" or a
+	// cloud endpoint. Empty means defaultBaseURL.
 	BaseURL string
 
 	// Timeout bounds each HTTP request to Ollama's /api/chat. Zero means
@@ -37,8 +39,12 @@ type Ollama struct {
 	// explicitly — the caller owns that client's timeout behavior.
 	Timeout time.Duration
 
+	// HTTPClient, if set, is used as-is (Timeout above is then ignored).
+	// Tests inject a client pointed at an httptest.Server here.
 	HTTPClient *http.Client
-	Config     internal.InstrumentConfig
+	// Config is the full instrument configuration this backend generates
+	// under — model, temperature, think/num_ctx/num_predict, etc.
+	Config internal.InstrumentConfig
 }
 
 // NewOllama returns an Ollama backend for the given instrument
@@ -47,7 +53,9 @@ func NewOllama(config internal.InstrumentConfig) *Ollama {
 	return &Ollama{Config: config}
 }
 
-// chatRequest is the /api/chat request payload.
+// chatRequest is the /api/chat request payload. Stream is always false —
+// this project reads one complete JSON response object per request, never
+// Ollama's streaming NDJSON mode.
 type chatRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
@@ -56,11 +64,18 @@ type chatRequest struct {
 	Options  chatOptions   `json:"options"`
 }
 
+// chatMessage is one entry in a chat request/response's message list.
+// Generate always sends exactly one, Role "user" — no system prompt or
+// multi-turn history, since each measurement sample is an independent
+// single-shot generation.
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
+// chatOptions carries the per-request generation parameters Ollama reads
+// from InstrumentConfig — the measurement-integrity-critical fields
+// (REQ-MSR-06) that must reach the backend exactly as configured.
 type chatOptions struct {
 	Temperature float64 `json:"temperature"`
 	NumCtx      int     `json:"num_ctx"`
@@ -109,6 +124,9 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 			estimatedPromptTokens, cfg.NumPredict, cfg.NumCtx)
 	}
 
+	// Build the request body from cfg exactly — no field here is optional
+	// or "tunable for convenience"; Think/NumCtx/NumPredict in particular
+	// are measurement-integrity requirements, not knobs.
 	reqBody := chatRequest{
 		Model:    cfg.Model,
 		Messages: []chatMessage{{Role: "user", Content: prompt}},
@@ -137,6 +155,11 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Read the full body before decoding rather than streaming through
+	// json.Decoder directly off resp.Body — stream:false means Ollama
+	// sends exactly one complete JSON object, so there's no benefit to
+	// incremental decoding, and reading fully first lets a decode error
+	// still report the HTTP status code alongside it (see below).
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return Generation{}, fmt.Errorf("instrument: read ollama response: %w", err)
@@ -147,8 +170,15 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 		return Generation{}, fmt.Errorf("instrument: decode ollama response (status %d): %w", resp.StatusCode, err)
 	}
 
+	// Ollama can signal failure two ways: a non-2xx HTTP status, or (less
+	// commonly) a 200 response whose body still carries a populated
+	// Error field — check both rather than trusting the status code alone.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || chatResp.Error != "" {
 		if isUnsupportedThinkError(chatResp.Error) {
+			// A distinct, actionable error for the specific case of
+			// requesting think mode on a model that doesn't support it —
+			// worth surfacing separately since the fix (Think=false) is
+			// immediate and specific, unlike a generic API error.
 			return Generation{}, fmt.Errorf(
 				"instrument: model %q does not support think mode; set InstrumentConfig.Think=false for this model (ollama: %s)",
 				cfg.Model, chatResp.Error)
@@ -173,6 +203,9 @@ func isUnsupportedThinkError(msg string) bool {
 	return strings.Contains(lower, "does not support") && strings.Contains(lower, "think")
 }
 
+// baseURL returns o.BaseURL with any trailing slash trimmed (so callers can
+// safely append "/api/chat" without producing a double slash), or
+// defaultBaseURL if unset.
 func (o *Ollama) baseURL() string {
 	if o.BaseURL != "" {
 		return strings.TrimRight(o.BaseURL, "/")
@@ -180,6 +213,9 @@ func (o *Ollama) baseURL() string {
 	return defaultBaseURL
 }
 
+// httpClient returns o.HTTPClient as-is if the caller supplied one
+// (tests do, pointed at an httptest.Server), otherwise constructs a fresh
+// client using o.timeout().
 func (o *Ollama) httpClient() *http.Client {
 	if o.HTTPClient != nil {
 		return o.HTTPClient

@@ -26,10 +26,25 @@ const DoneReasonStop = "stop"
 // than inferring truncation from EvalCount == NumPredict — prefer it when
 // available and non-empty.
 type Generation struct {
-	Text            []byte // generated content
-	PromptEvalCount int    // tokens the backend counted in the prompt
-	EvalCount       int    // tokens the backend generated
-	DoneReason      string // backend-reported stop reason, e.g. "stop"/"length" for Ollama
+	// Text is the raw generated content, exactly as returned by the
+	// backend — extraction of the actual Go source from any surrounding
+	// prose/fencing happens downstream (see ExtractGoBlock in prompt.go).
+	Text []byte
+	// PromptEvalCount is how many tokens the backend itself counted in the
+	// prompt — ground truth for cross-checking InstrumentConfig.NumCtx
+	// against the actual prompt size (see EstimatePromptTokens's
+	// under-estimate detection in prompt.go).
+	PromptEvalCount int
+	// EvalCount is how many tokens the backend generated for this
+	// response — compared against InstrumentConfig.NumPredict to help
+	// infer truncation when DoneReason is unavailable or ambiguous.
+	EvalCount int
+	// DoneReason is the backend-reported stop reason — "stop" (natural
+	// completion) or "length" (cut off by NumPredict) for Ollama, see
+	// DoneReasonStop/DoneReasonLength above. May be empty for backends
+	// that don't report it, in which case callers fall back to comparing
+	// EvalCount against NumPredict.
+	DoneReason string
 }
 
 // Generator is the pluggable instrument interface. v0.1 ships one backend,
@@ -37,5 +52,11 @@ type Generation struct {
 // configuration's think/num_ctx/num_predict fields exactly — these are
 // measurement-integrity requirements, not defaults to optimize away.
 type Generator interface {
+	// Generate produces one generation for prompt, honoring ctx
+	// cancellation. Implementations own their own retry/timeout policy for
+	// transient backend errors; a returned error is treated by callers
+	// (runMeasureWithGenerator in cmd/tumanomir) as a hard failure of the
+	// whole measurement run, not a per-sample condition to retry around —
+	// see that function's error-signaling contract.
 	Generate(ctx context.Context, prompt string) (Generation, error)
 }
