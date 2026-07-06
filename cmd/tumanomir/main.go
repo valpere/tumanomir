@@ -223,6 +223,17 @@ type measureResult struct {
 // runMeasureWithGenerator for the testable retry/discard/analyze logic,
 // then prints the report.
 func runMeasure(args []string) int {
+	return runMeasureImpl(args, func(cfg internal.InstrumentConfig) instrument.Generator {
+		return instrument.NewOllama(cfg)
+	})
+}
+
+// runMeasureImpl is runMeasure's testable core: it takes the generator
+// constructor as a parameter (mirroring runMeasureWithGenerator's own
+// dependency-injection style) so tests can drive flag parsing, config
+// construction, and the exit-code branch through a fake Generator without
+// touching the network (issue #70).
+func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instrument.Generator) int {
 	th := internal.DefaultThresholds()
 	fs := flag.NewFlagSet("measure", flag.ExitOnError)
 
@@ -319,7 +330,7 @@ func runMeasure(args []string) int {
 
 	// v0.1 ships only "ollama"; already validated above. Future backends
 	// would switch on cfg.Backend here.
-	gen := instrument.NewOllama(cfg)
+	gen := newGen(cfg)
 
 	mr, err := runMeasureWithGenerator(gen, cfg, specContent, samples, th)
 	if err != nil {

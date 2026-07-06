@@ -959,3 +959,149 @@ func TestRunMeasureFlagValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestRunMeasureImplFlagMapping drives runMeasureImpl through its full CLI
+// wiring (flag parse -> InstrumentConfig -> generator construction) and
+// captures the InstrumentConfig the (faked) generator constructor actually
+// received, guarding against a flag-to-field mapping typo that
+// runMeasureWithGenerator's own direct-call tests can't catch (issue #70).
+func TestRunMeasureImplFlagMapping(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	args := []string{
+		"--instrument", "ollama:my-model",
+		"--temp", "0.7",
+		"--samples", "4",
+		"--think",
+		"--num-ctx", "4096",
+		"--num-predict", "512",
+		"--sim-threshold", "0.8",
+		specPath,
+	}
+
+	var gotCfg internal.InstrumentConfig
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	_, code := captureStdout(t, func() int {
+		return runMeasureImpl(args, func(cfg internal.InstrumentConfig) instrument.Generator {
+			gotCfg = cfg
+			return gen
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	want := internal.InstrumentConfig{
+		Backend:      "ollama",
+		Model:        "my-model",
+		Temperature:  0.7,
+		Samples:      4,
+		Think:        true,
+		NumCtx:       4096,
+		NumPredict:   512,
+		SimThreshold: 0.8,
+	}
+	if gotCfg.Backend != want.Backend || gotCfg.Model != want.Model ||
+		gotCfg.Temperature != want.Temperature || gotCfg.Samples != want.Samples ||
+		gotCfg.Think != want.Think || gotCfg.NumCtx != want.NumCtx ||
+		gotCfg.NumPredict != want.NumPredict || gotCfg.SimThreshold != want.SimThreshold {
+		t.Fatalf("cfg = %+v, want fields matching %+v", gotCfg, want)
+	}
+	if gotCfg.Prompt == "" || gotCfg.PromptVersion == "" {
+		t.Fatalf("cfg.Prompt/PromptVersion left unset; got %+v", gotCfg)
+	}
+}
+
+// TestRunMeasureImplExitCode drives runMeasureImpl end-to-end (real flag
+// parsing, not a direct runMeasureWithGenerator call) and asserts the exit
+// code follows DPairVerdict — the branch at main.go:332-335 that no
+// existing test reaches through runMeasure's own wiring (issue #70).
+func TestRunMeasureImplExitCode(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{
+		"--instrument", "ollama:m",
+		"--samples", "4",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+
+	tests := []struct {
+		name     string
+		newGen   func(internal.InstrumentConfig) instrument.Generator
+		wantCode int
+	}{
+		{
+			name: "DPairVerdict ok -> exit 0",
+			newGen: func(internal.InstrumentConfig) instrument.Generator {
+				return &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+					return genOK(goBlock(testSrcFoo))
+				}}
+			},
+			wantCode: 0,
+		},
+		{
+			name: "DPairVerdict block -> exit 1",
+			newGen: func(internal.InstrumentConfig) instrument.Generator {
+				srcs := []string{testSrcFoo, testSrcBar, testSrcFoo, testSrcBar}
+				return &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+					return genOK(goBlock(srcs[call%len(srcs)]))
+				}}
+			},
+			wantCode: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, code := captureStdout(t, func() int { return runMeasureImpl(args, tt.newGen) })
+			if code != tt.wantCode {
+				t.Fatalf("code = %d, want %d", code, tt.wantCode)
+			}
+		})
+	}
+}
+
+// TestRunMeasureImplGeneratorErrorReturns2 asserts that a hard Generate
+// failure (network/HTTP/preflight, surfaced by runMeasureWithGenerator as a
+// non-nil error) is printed to stderr and causes runMeasureImpl itself to
+// return 2, through the full wiring rather than a direct
+// runMeasureWithGenerator call (issue #70).
+func TestRunMeasureImplGeneratorErrorReturns2(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{
+		"--instrument", "ollama:m",
+		"--samples", "4",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+
+	errOut, code := captureStderr(t, func() int {
+		return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+			return &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+				return instrument.Generation{}, errFakeGenerate
+			}}
+		})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
