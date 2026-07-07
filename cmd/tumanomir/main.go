@@ -272,11 +272,14 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	// these flags aren't backed by one InstrumentConfig variable.
 	seeded := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95})
 	// The combined "backend:model" default is composed only when the
-	// config actually set one of the two — leaving it "" (not ":")
-	// otherwise, so the no-config-file behavior (and its "--instrument is
-	// required" error) is unchanged.
+	// config set BOTH parts — a config with only one of the two leaves
+	// this "" so the existing "--instrument is required" error still
+	// fires, rather than producing a malformed default like "ollama:" or
+	// ":my-model" that would bypass that clear error for a confusing
+	// downstream backend:model-format parse failure instead (fix-review,
+	// glm-5.1:cloud + deepseek-v4-flash:cloud, independently).
 	instrumentDefault := ""
-	if seeded.Backend != "" || seeded.Model != "" {
+	if seeded.Backend != "" && seeded.Model != "" {
 		instrumentDefault = seeded.Backend + ":" + seeded.Model
 	}
 

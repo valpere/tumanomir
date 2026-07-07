@@ -9,10 +9,12 @@ import (
 	"github.com/valpere/tumanomir/internal"
 )
 
-func ptrF(v float64) *float64 { return &v }
-func ptrI(v int) *int         { return &v }
-func ptrB(v bool) *bool       { return &v }
-func ptrS(v string) *string   { return &v }
+// ptr returns a pointer to v — a generic replacement for the four
+// type-specific ptrF/ptrI/ptrB/ptrS helpers this file previously had
+// (fix-review, deepseek-v4-flash:cloud): Go's type inference resolves T
+// from each call site's argument, so no call site needs updating beyond
+// the function name.
+func ptr[T any](v T) *T { return &v }
 
 // --- Load: valid file, missing file, malformed YAML (⚖️ Balanced) ---
 
@@ -92,28 +94,28 @@ func TestApplyThresholds(t *testing.T) {
 		},
 		{
 			name: "only KDriftMax set",
-			cfg:  Config{Thresholds: &Thresholds{KDriftMax: ptrF(0.10)}},
+			cfg:  Config{Thresholds: &Thresholds{KDriftMax: ptr(0.10)}},
 			in:   internal.Thresholds{KDriftMax: 0.20, DConstMin: 0.35, DPairMax: 0.30},
 			want: internal.Thresholds{KDriftMax: 0.10, DConstMin: 0.35, DPairMax: 0.30},
 		},
 		{
 			name: "only DConstMin set",
-			cfg:  Config{Thresholds: &Thresholds{DConstMin: ptrF(0.50)}},
+			cfg:  Config{Thresholds: &Thresholds{DConstMin: ptr(0.50)}},
 			in:   internal.Thresholds{KDriftMax: 0.20, DConstMin: 0.35, DPairMax: 0.30},
 			want: internal.Thresholds{KDriftMax: 0.20, DConstMin: 0.50, DPairMax: 0.30},
 		},
 		{
 			name: "only DPairMax set",
-			cfg:  Config{Thresholds: &Thresholds{DPairMax: ptrF(0.40)}},
+			cfg:  Config{Thresholds: &Thresholds{DPairMax: ptr(0.40)}},
 			in:   internal.Thresholds{KDriftMax: 0.20, DConstMin: 0.35, DPairMax: 0.30},
 			want: internal.Thresholds{KDriftMax: 0.20, DConstMin: 0.35, DPairMax: 0.40},
 		},
 		{
 			name: "all three set, including an explicit zero",
 			cfg: Config{Thresholds: &Thresholds{
-				KDriftMax: ptrF(0.0),
-				DConstMin: ptrF(0.60),
-				DPairMax:  ptrF(0.05),
+				KDriftMax: ptr(0.0),
+				DConstMin: ptr(0.60),
+				DPairMax:  ptr(0.05),
 			}},
 			in:   internal.Thresholds{KDriftMax: 0.20, DConstMin: 0.35, DPairMax: 0.30},
 			want: internal.Thresholds{KDriftMax: 0.0, DConstMin: 0.60, DPairMax: 0.05},
@@ -163,55 +165,55 @@ func TestInstrumentOr(t *testing.T) {
 		},
 		{
 			name: "only Backend set",
-			cfg:  Config{Instrument: &Instrument{Backend: ptrS("ollama")}},
+			cfg:  Config{Instrument: &Instrument{Backend: ptr("ollama")}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.Backend = "ollama" }),
 		},
 		{
 			name: "only Model set",
-			cfg:  Config{Instrument: &Instrument{Model: ptrS("qwen3-coder:30b")}},
+			cfg:  Config{Instrument: &Instrument{Model: ptr("qwen3-coder:30b")}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.Model = "qwen3-coder:30b" }),
 		},
 		{
 			name: "only Temperature set",
-			cfg:  Config{Instrument: &Instrument{Temperature: ptrF(0.5)}},
+			cfg:  Config{Instrument: &Instrument{Temperature: ptr(0.5)}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.Temperature = 0.5 }),
 		},
 		{
 			name: "only Samples set",
-			cfg:  Config{Instrument: &Instrument{Samples: ptrI(20)}},
+			cfg:  Config{Instrument: &Instrument{Samples: ptr(20)}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.Samples = 20 }),
 		},
 		{
 			name: "only Think set true",
-			cfg:  Config{Instrument: &Instrument{Think: ptrB(true)}},
+			cfg:  Config{Instrument: &Instrument{Think: ptr(true)}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.Think = true }),
 		},
 		{
 			name: "only NumCtx set",
-			cfg:  Config{Instrument: &Instrument{NumCtx: ptrI(8192)}},
+			cfg:  Config{Instrument: &Instrument{NumCtx: ptr(8192)}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.NumCtx = 8192 }),
 		},
 		{
 			name: "only NumPredict set",
-			cfg:  Config{Instrument: &Instrument{NumPredict: ptrI(2048)}},
+			cfg:  Config{Instrument: &Instrument{NumPredict: ptr(2048)}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.NumPredict = 2048 }),
 		},
 		{
 			name: "only SimThreshold set",
-			cfg:  Config{Instrument: &Instrument{SimThreshold: ptrF(0.8)}},
+			cfg:  Config{Instrument: &Instrument{SimThreshold: ptr(0.8)}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.SimThreshold = 0.8 }),
 		},
 		{
 			name: "all fields set, including explicit zero/false",
 			cfg: Config{Instrument: &Instrument{
-				Backend:      ptrS("ollama"),
-				Model:        ptrS("m"),
-				Temperature:  ptrF(0.0),
-				Samples:      ptrI(2),
-				Think:        ptrB(false),
-				NumCtx:       ptrI(4096),
-				NumPredict:   ptrI(512),
-				SimThreshold: ptrF(0.0),
+				Backend:      ptr("ollama"),
+				Model:        ptr("m"),
+				Temperature:  ptr(0.0),
+				Samples:      ptr(2),
+				Think:        ptr(false),
+				NumCtx:       ptr(4096),
+				NumPredict:   ptr(512),
+				SimThreshold: ptr(0.0),
 			}},
 			want: withInstrument(def, func(c *internal.InstrumentConfig) {
 				c.Backend = "ollama"
