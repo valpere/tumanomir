@@ -204,11 +204,37 @@ for exactly that reason.
     read the resulting number as a stress-test-regime absolute, not the
     article's calibrated, working-temperature delta.
 
+### 2.4 Configuration file (.tumanomir.yaml)
+
+16. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
+    optional `.tumanomir.yaml` config file so thresholds and instrument
+    settings don't have to be repeated as CLI flags on every invocation.
+    An explicit `--config <path>` is authoritative: the named file must
+    exist and parse, or the command exits 2. Otherwise `./.tumanomir.yaml`
+    (current working directory only, no upward directory search) is
+    loaded if present and silently skipped if absent. The file's schema
+    mirrors `@schema Thresholds`/`@schema InstrumentConfig` above, minus
+    `prompt` (deliberately non-configurable — REQ-MSR-04's reproducibility
+    invariant would be undermined by letting the prompt vary per project).
+    -> [FUN-CFG-02] internal/config.Config, internal/config.Load(path string)
+       (internal/config.Config, error)
+
+17. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
+    Each subcommand's config file is resolved before its `flag.FlagSet` is
+    built, and the resolved value seeds each flag's own default — so
+    `flag.Parse`'s ordinary override behavior gives CLI-flag-wins for
+    free, with no post-parse `fs.Visit` reconciliation needed.
+    -> [FUN-CFG-03] internal/config.Config.ApplyThresholds(th
+       *internal.Thresholds), internal/config.Config.InstrumentOr(def
+       internal.InstrumentConfig) internal.InstrumentConfig; called from
+       cmd/tumanomir's runCheck/runMeasureImpl before their fs.*Var
+       registrations
+
 ---
 
 ## 3. Non-functional requirements
 
-16. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+18. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -231,11 +257,15 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-17. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only for v0.1
-    (no CLI frameworks, no YAML deps until the gate command exists).
-    -> [PHY-NFR-02] go.mod with zero external requires
+19. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+    gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
+    (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
+    lifting the "no YAML deps" constraint; it is not a general license for
+    further dependencies without a similarly documented need.
+    -> [PHY-NFR-02] go.mod with exactly one external require:
+       gopkg.in/yaml.v3
 
-18. [REQ-NFR-03] Methodology invariants must not be silently changed:
+20. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.
@@ -245,7 +275,8 @@ for exactly that reason.
 
 ## 4. Out of scope for v0.1 (roadmap)
 
-- `.tumanomir.yaml` config and `gate` command (CI mode)
+- `gate` command (CI mode) — `.tumanomir.yaml` config file support has
+  shipped (REQ-CFG-02/03); `gate` itself is still pending.
 - baseline calibration (`calibrate` command), bootstrap CIs
 - graph-based D_const (RFLP/Neo4j), assisted K_drift (LLM parser)
 - non-Ollama instruments, non-Go projections (SQL DDL, OpenAPI)

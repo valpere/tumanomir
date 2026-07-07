@@ -52,6 +52,11 @@ tumanomir check [flags] <file.md|dir>   # детермінований шар: K
 tumanomir measure [flags] <file.md>     # стохастичний шар: D_pair, H_norm
 tumanomir version                       # надрукувати версію і вийти
 
+# check і measure
+--config  string  шлях до .tumanomir.yaml (за замовчуванням: завантажити
+                   ./.tumanomir.yaml, якщо є, лише поточна директорія, без
+                   пошуку вгору; явний --config має існувати і парситись)
+
 # check
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
 --d-const-min  float   warn: min lexical constraint density (default 0.35)
@@ -75,6 +80,7 @@ tumanomir version                       # надрукувати версію і
 cmd/tumanomir/          CLI (stdlib flag, підкоманди check/measure/version)
 internal/types.go       спільні типи (Verdict, Thresholds, InstrumentConfig,
                          KDriftResult, DConstResult, DispersionResult)
+internal/config/        завантаження .tumanomir.yaml (REQ-CFG-02/03)
 internal/spec/          завантаження markdown-специфікацій (файл або директорія)
 internal/metrics/       K_drift (лінтер трасування), D_const (лексичний сканер)
 internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair
@@ -83,8 +89,8 @@ internal/report/        рендеринг CheckResult/MeasureResult у TTY-зв
 ```
 
 `internal/instrument` — єдиний пакет, якому дозволено мережу
-(`internal/nonetwork_test.go` рантайм-перевіряє, що `internal/metrics` і
-`internal/spec` цього не порушують — REQ-CHK-05).
+(`internal/nonetwork_test.go` рантайм-перевіряє, що `internal/metrics`,
+`internal/spec` і `internal/config` цього не порушують — REQ-CHK-05).
 
 Рендеринг звітів винесено в `internal/report` (`RenderCheck`/`RenderMeasure`,
 issue #82): пакет залежить лише від `internal`, ніколи від

@@ -73,7 +73,8 @@ make ci        # build + vet + test + lint + dogfood, all together
 
 ## Conventions
 
-- Go >= 1.26, stdlib-only in v0.1 (no CLI frameworks, no YAML dependencies).
+- Go >= 1.26, stdlib-only except gopkg.in/yaml.v3 for .tumanomir.yaml
+  config parsing (REQ-CFG-02/NFR-02) — no CLI frameworks.
 - Types: shared ones in `internal/types.go`; package-specific in
   `internal/<pkg>/` (higher-level types take priority on conflicts).
 - Code/comments/messages — English; session communication — Ukrainian

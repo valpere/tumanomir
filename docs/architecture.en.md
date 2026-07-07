@@ -53,6 +53,11 @@ tumanomir check [flags] <file.md|dir>   # deterministic layer: K_drift, D_const
 tumanomir measure [flags] <file.md>     # stochastic layer: D_pair, H_norm
 tumanomir version                       # print version and exit
 
+# check and measure
+--config  string  path to a .tumanomir.yaml config file (default: load
+                   ./.tumanomir.yaml if present, cwd only, no upward
+                   search; a named --config path must exist and parse)
+
 # check
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
 --d-const-min  float   warn: min lexical constraint density (default 0.35)
@@ -76,6 +81,7 @@ Output is human-readable in a TTY; exit code: 0 ok / 1 gate failed / 2 error.
 cmd/tumanomir/          CLI (stdlib flag, check/measure/version subcommands)
 internal/types.go       shared types (Verdict, Thresholds, InstrumentConfig,
                          KDriftResult, DConstResult, DispersionResult)
+internal/config/        loads .tumanomir.yaml (REQ-CFG-02/03)
 internal/spec/          markdown specification loading (file or directory)
 internal/metrics/       K_drift (traceability linter), D_const (lexical scanner)
 internal/dispersion/    AST features, cosine, single-linkage, entropy, D_pair
@@ -84,8 +90,8 @@ internal/report/        renders CheckResult/MeasureResult into a TTY report (REQ
 ```
 
 `internal/instrument` is the only package allowed to make network calls
-(`internal/nonetwork_test.go` runtime-verifies that `internal/metrics` and
-`internal/spec` don't violate this — REQ-CHK-05).
+(`internal/nonetwork_test.go` runtime-verifies that `internal/metrics`,
+`internal/spec`, and `internal/config` don't violate this — REQ-CHK-05).
 
 Report rendering has been extracted into `internal/report`
 (`RenderCheck`/`RenderMeasure`, issue #82): the package depends only on

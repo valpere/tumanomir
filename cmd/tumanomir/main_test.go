@@ -939,3 +939,275 @@ func TestRunMeasureImplGeneratorErrorReturns2(t *testing.T) {
 		t.Fatal("want a non-empty actionable stderr message")
 	}
 }
+
+// --- .tumanomir.yaml config support (issue #86) ---
+
+// chdir switches the test's working directory to dir for the duration of
+// the test, restoring the original on cleanup — needed for exercising the
+// cwd-only ./.tumanomir.yaml discovery rule without touching the repo's
+// own working directory (which has no such file, so this is safe).
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("os.Chdir(%s): %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Fatalf("restore os.Chdir(%s): %v", orig, err)
+		}
+	})
+}
+
+func TestScanConfigFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantPath string
+		wantOk   bool
+	}{
+		{"absent", []string{"--instrument", "ollama:m"}, "", false},
+		{"--config value", []string{"--config", "foo.yaml", "spec.md"}, "foo.yaml", true},
+		{"--config=value", []string{"--config=foo.yaml"}, "foo.yaml", true},
+		{"-config value (single dash)", []string{"-config", "foo.yaml"}, "foo.yaml", true},
+		{"appears after another flag's own value", []string{"--k-drift-max", "0.5", "--config", "foo.yaml"}, "foo.yaml", true},
+		{"stops scanning at --", []string{"--", "--config", "foo.yaml"}, "", false},
+		{"--config with no following value", []string{"--config"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, ok := scanConfigFlag(tt.args)
+			if path != tt.wantPath || ok != tt.wantOk {
+				t.Fatalf("scanConfigFlag(%v) = (%q, %v), want (%q, %v)", tt.args, path, ok, tt.wantPath, tt.wantOk)
+			}
+		})
+	}
+}
+
+func TestResolveConfigExplicitMissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	errOut, code := captureStderr(t, func() int {
+		if _, ok := resolveConfig([]string{"--config", missing}, "check"); !ok {
+			return 2
+		}
+		return 0
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+func TestResolveConfigExplicitMalformedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(path, []byte("thresholds: [not a mapping\n"), 0o644); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int {
+		if _, ok := resolveConfig([]string{"--config", path}, "check"); !ok {
+			return 2
+		}
+		return 0
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+func TestResolveConfigDefaultAbsentIsSilentlySkipped(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	cfg, ok := resolveConfig(nil, "check")
+	if !ok {
+		t.Fatal("want ok=true when ./.tumanomir.yaml is absent")
+	}
+	if cfg.Thresholds != nil || cfg.Instrument != nil {
+		t.Fatalf("want a zero-value Config when no config file is found, got %+v", cfg)
+	}
+}
+
+func TestResolveConfigDefaultPresentIsLoaded(t *testing.T) {
+	chdir(t, t.TempDir())
+	if err := os.WriteFile(defaultConfigPath, []byte("thresholds:\n  k_drift_max: 0.10\n"), 0o644); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	cfg, ok := resolveConfig(nil, "check")
+	if !ok {
+		t.Fatal("want ok=true when ./.tumanomir.yaml parses cleanly")
+	}
+	if cfg.Thresholds == nil || cfg.Thresholds.KDriftMax == nil || *cfg.Thresholds.KDriftMax != 0.10 {
+		t.Fatalf("cfg.Thresholds = %+v, want KDriftMax=0.10", cfg.Thresholds)
+	}
+}
+
+// TestRunCheckConfigLoosensThreshold guards the full runCheck wiring: a
+// spec that would fail the default K_drift gate (0.20) passes once
+// ./.tumanomir.yaml raises k_drift_max above its actual value.
+func TestRunCheckConfigLoosensThreshold(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	specPath := filepath.Join(dir, "spec.md")
+	spec := "[REQ-X-01] traced\n-> [FUN-X-01] Do()\n[REQ-X-02] not traced\n"
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	if err := os.WriteFile(defaultConfigPath, []byte("thresholds:\n  k_drift_max: 0.90\n"), 0o644); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int { return runCheck([]string{specPath}) })
+	if code != 0 {
+		t.Fatalf("want exit code 0 (K_drift 0.5 <= configured 0.90), got %d\noutput:\n%s", code, out)
+	}
+}
+
+// TestRunCheckCLIFlagOverridesConfig asserts CLI flag > config precedence:
+// an explicit --k-drift-max still gates even though the config file would
+// otherwise loosen the threshold enough to pass.
+func TestRunCheckCLIFlagOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	specPath := filepath.Join(dir, "spec.md")
+	spec := "[REQ-X-01] traced\n-> [FUN-X-01] Do()\n[REQ-X-02] not traced\n"
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	if err := os.WriteFile(defaultConfigPath, []byte("thresholds:\n  k_drift_max: 0.90\n"), 0o644); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int {
+		return runCheck([]string{"--k-drift-max", "0.0", specPath})
+	})
+	if code != 1 {
+		t.Fatalf("want exit code 1 (--k-drift-max=0.0 overrides the looser config value), got %d\noutput:\n%s", code, out)
+	}
+}
+
+func TestRunCheckExplicitConfigMissingFileReturns2(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	missing := filepath.Join(dir, "does-not-exist.yaml")
+
+	errOut, code := captureStderr(t, func() int {
+		return runCheck([]string{"--config", missing, specPath})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestRunMeasureImplConfigSeedsInstrumentDefaults drives runMeasureImpl
+// with no --instrument/--samples/... flags at all, relying entirely on
+// ./.tumanomir.yaml to supply them, mirroring
+// TestRunMeasureImplFlagMapping's captured-InstrumentConfig style.
+func TestRunMeasureImplConfigSeedsInstrumentDefaults(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	configYAML := `
+instrument:
+  backend: ollama
+  model: my-model
+  temperature: 0.7
+  samples: 4
+  think: true
+  num_ctx: 4096
+  num_predict: 512
+  sim_threshold: 0.8
+`
+	if err := os.WriteFile(defaultConfigPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	var gotCfg internal.InstrumentConfig
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	out, code := captureStdout(t, func() int {
+		return runMeasureImpl([]string{specPath}, func(cfg internal.InstrumentConfig) instrument.Generator {
+			gotCfg = cfg
+			return gen
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0\noutput:\n%s", code, out)
+	}
+
+	want := internal.InstrumentConfig{
+		Backend:      "ollama",
+		Model:        "my-model",
+		Temperature:  0.7,
+		Samples:      4,
+		Think:        true,
+		NumCtx:       4096,
+		NumPredict:   512,
+		SimThreshold: 0.8,
+	}
+	if gotCfg.Backend != want.Backend || gotCfg.Model != want.Model ||
+		gotCfg.Temperature != want.Temperature || gotCfg.Samples != want.Samples ||
+		gotCfg.Think != want.Think || gotCfg.NumCtx != want.NumCtx ||
+		gotCfg.NumPredict != want.NumPredict || gotCfg.SimThreshold != want.SimThreshold {
+		t.Fatalf("cfg = %+v, want fields matching %+v", gotCfg, want)
+	}
+}
+
+// TestRunMeasureImplCLIFlagOverridesConfig asserts CLI flag > config
+// precedence on the instrument side: an explicit --samples still wins
+// over the config file's value.
+func TestRunMeasureImplCLIFlagOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	configYAML := `
+instrument:
+  backend: ollama
+  model: my-model
+  samples: 10
+  num_ctx: 4096
+  num_predict: 512
+`
+	if err := os.WriteFile(defaultConfigPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write default config: %v", err)
+	}
+
+	var gotCfg internal.InstrumentConfig
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	out, code := captureStdout(t, func() int {
+		return runMeasureImpl([]string{"--samples", "4", specPath}, func(cfg internal.InstrumentConfig) instrument.Generator {
+			gotCfg = cfg
+			return gen
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0\noutput:\n%s", code, out)
+	}
+	if gotCfg.Samples != 4 {
+		t.Fatalf("gotCfg.Samples = %d, want 4 (CLI flag must override config's 10)", gotCfg.Samples)
+	}
+}

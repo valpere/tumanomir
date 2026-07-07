@@ -17,10 +17,11 @@ end-to-end against a real Ollama instance. Details: [`architecture.md`](architec
 
 ## Near-term — the logical next step
 
-1. **`.tumanomir.yaml` config + a `gate` command.** CI mode: one config
+1. **A `gate` command.** The `.tumanomir.yaml` config file (one config
    file instead of repeating `--k-drift-max`/`--instrument`/... on every
-   invocation; `gate` = `check`+`measure` in one pass with a single exit
-   code for CI. `internal/report` (rendering of `CheckResult`/
+   invocation) has already shipped (`internal/config`, REQ-CFG-02/03);
+   what's left is `gate` = `check`+`measure` in one pass with a single
+   exit code for CI. `internal/report` (rendering of `CheckResult`/
    `MeasureResult`, issue #82) has already been extracted out of
    `cmd/tumanomir/main.go` — the prerequisite that avoids duplicating
    rendering logic is done; `gate` adds a unified `report.Render`/`Report`
