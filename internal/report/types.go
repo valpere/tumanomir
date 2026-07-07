@@ -47,3 +47,25 @@ type MeasureResult struct {
 	// not have held for this run (issue #57).
 	PromptUnderestimated int
 }
+
+// Report is gate's unified result (@schema Report, REQ-GATE-01): it wraps
+// CheckResult/MeasureResult rather than flattening their fields — flattening
+// would duplicate every field CheckResult/MeasureResult already declare, a
+// DRY violation gate's own additive design (issue #87) is meant to avoid.
+type Report struct {
+	// Check is always populated — gate always runs the deterministic layer.
+	Check CheckResult
+	// Measure is nil when the stochastic layer was never attempted (no
+	// instrument resolved from CLI flags or .tumanomir.yaml), distinct from
+	// a Measure that ran and produced VerdictSkipped (tried, couldn't).
+	Measure *MeasureResult
+	// Verdict is the worst-case precedence (block > warn > skipped > ok)
+	// over {Check.KDVerdict, Check.DCVerdict, Measure.DPairVerdict if
+	// present} — see cmd/tumanomir's gateVerdict (REQ-GATE-03).
+	Verdict internal.Verdict
+	// ExitCode is 1 iff Check.KDVerdict or Measure.DPairVerdict is
+	// VerdictBlock; DCVerdict/H/H_norm never independently produce
+	// ExitCode == 1 (REQ-CHK-06/REQ-MSR-02). 2 is reserved for execution
+	// errors that never reach a rendered Report.
+	ExitCode int
+}

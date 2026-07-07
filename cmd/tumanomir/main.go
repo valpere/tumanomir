@@ -35,19 +35,24 @@ const usage = `tumanomir — specification-precision measurement for AI projects
 Usage:
   tumanomir check [flags] <file.md|dir>   deterministic layer: K_drift, D_const
   tumanomir measure [flags] <file.md>     stochastic layer: D_pair, H_norm
+  tumanomir gate [flags] <file.md>        CI mode: check + measure (if an
+                                           instrument resolves) in one pass,
+                                           one unified exit code
   tumanomir version
 
-Flags for check and measure:
+Flags for check, measure, and gate:
   --config  string  path to a .tumanomir.yaml config file (default: load
                      ./.tumanomir.yaml if present, cwd only, no upward
                      search; a named --config path must exist and parse)
 
-Flags for check:
+Flags for check (and gate):
   --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
   --d-const-min  float   warn: min lexical constraint density (default 0.35)
 
-Flags for measure:
-  --instrument     string  required, format backend:model (e.g. ollama:qwen3-coder:30b)
+Flags for measure (and gate, once an instrument resolves):
+  --instrument     string  format backend:model (e.g. ollama:qwen3-coder:30b);
+                            required for measure, optional for gate — an
+                            unresolved instrument runs gate deterministic-only
   -n, --samples    int     number of generations to sample, must be >=2 (default 10)
   --temp           float   sampling temperature (default 1.0)
   --sim-threshold  float   single-linkage clustering threshold, in [0,1] (default 0.95)
@@ -55,6 +60,11 @@ Flags for measure:
   --num-predict    int     required: max generated tokens; must exceed natural output length
   --think          bool    enable reasoning-model think mode (default false)
   --d-pair-max     float   gate: max 1-minus-mean-pairwise-AST-similarity (default 0.30)
+
+gate fails with exit code 2 if any measure-specific flag above is passed
+explicitly while no instrument resolves (CLI flags or .tumanomir.yaml's
+instrument: section) — a silently-downgraded gate run is a
+measurement-integrity bug, not a convenience (REQ-GATE-02).
 
 Flag precedence: CLI flag > .tumanomir.yaml > built-in default. See
 .tumanomir.yaml's schema in docs/requirements.md (REQ-CFG-02/03).
@@ -84,6 +94,8 @@ func dispatch(args []string) int {
 		return runCheck(args[1:])
 	case "measure":
 		return runMeasure(args[1:])
+	case "gate":
+		return runGate(args[1:])
 	case "version":
 		fmt.Println("tumanomir", version)
 		return 0
@@ -252,6 +264,56 @@ func runMeasure(args []string) int {
 	})
 }
 
+// validateMeasureFlags validates the measure-specific flag set shared by
+// `measure` (where an instrument is always required) and `gate` (where
+// validateMeasureFlags is only called once gate has already established
+// that an instrument resolved — see runGateImpl) — extracted so the two
+// callers can't drift apart on --instrument's format rules or the
+// samples/sim-threshold/num-ctx/num-predict constraints (issue #87).
+// Prints an actionable cmdName-prefixed stderr message and returns
+// ok=false on the first violation, mirroring resolveConfig's own
+// error-reporting convention.
+func validateMeasureFlags(cmdName, instrumentFlag string, samples int, simThreshold float64, numCtx, numPredict int) (backend, model string, ok bool) {
+	if instrumentFlag == "" {
+		fmt.Fprintf(os.Stderr, "%s: --instrument is required, format backend:model (e.g. ollama:qwen3-coder:30b)\n", cmdName)
+		return "", "", false
+	}
+	// Split on the first ':' only — model names may themselves contain ':'
+	// (e.g. qwen3-coder:30b).
+	colon := strings.Index(instrumentFlag, ":")
+	if colon < 0 {
+		fmt.Fprintf(os.Stderr, "%s: --instrument must be in backend:model format (e.g. ollama:qwen3-coder:30b)\n", cmdName)
+		return "", "", false
+	}
+	backend, model = instrumentFlag[:colon], instrumentFlag[colon+1:]
+	if backend == "" || model == "" {
+		fmt.Fprintf(os.Stderr, "%s: --instrument backend and model must both be non-empty (format backend:model)\n", cmdName)
+		return "", "", false
+	}
+	if backend != "ollama" {
+		fmt.Fprintf(os.Stderr, "%s: unsupported backend %q; v0.1 supports only \"ollama\"\n", cmdName, backend)
+		return "", "", false
+	}
+
+	if samples < 2 {
+		fmt.Fprintf(os.Stderr, "%s: --samples (-n) must be >= 2 to compute pairwise similarity\n", cmdName)
+		return "", "", false
+	}
+	if simThreshold < 0 || simThreshold > 1 {
+		fmt.Fprintf(os.Stderr, "%s: --sim-threshold must be within [0,1]\n", cmdName)
+		return "", "", false
+	}
+	if numCtx <= 0 {
+		fmt.Fprintf(os.Stderr, "%s: --num-ctx is required (must exceed the prompt token count)\n", cmdName)
+		return "", "", false
+	}
+	if numPredict <= 0 {
+		fmt.Fprintf(os.Stderr, "%s: --num-predict is required (must exceed the natural output length)\n", cmdName)
+		return "", "", false
+	}
+	return backend, model, true
+}
+
 // runMeasureImpl is runMeasure's testable core: it takes the generator
 // constructor as a parameter (mirroring runMeasureWithGenerator's own
 // dependency-injection style) so tests can drive flag parsing, config
@@ -307,41 +369,8 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	_ = fs.Parse(args)
 
-	if instrumentFlag == "" {
-		fmt.Fprintln(os.Stderr, "measure: --instrument is required, format backend:model (e.g. ollama:qwen3-coder:30b)")
-		return 2
-	}
-	// Split on the first ':' only — model names may themselves contain ':'
-	// (e.g. qwen3-coder:30b).
-	colon := strings.Index(instrumentFlag, ":")
-	if colon < 0 {
-		fmt.Fprintln(os.Stderr, "measure: --instrument must be in backend:model format (e.g. ollama:qwen3-coder:30b)")
-		return 2
-	}
-	backend, model := instrumentFlag[:colon], instrumentFlag[colon+1:]
-	if backend == "" || model == "" {
-		fmt.Fprintln(os.Stderr, "measure: --instrument backend and model must both be non-empty (format backend:model)")
-		return 2
-	}
-	if backend != "ollama" {
-		fmt.Fprintf(os.Stderr, "measure: unsupported backend %q; v0.1 supports only \"ollama\"\n", backend)
-		return 2
-	}
-
-	if samples < 2 {
-		fmt.Fprintln(os.Stderr, "measure: --samples (-n) must be >= 2 to compute pairwise similarity")
-		return 2
-	}
-	if simThreshold < 0 || simThreshold > 1 {
-		fmt.Fprintln(os.Stderr, "measure: --sim-threshold must be within [0,1]")
-		return 2
-	}
-	if numCtx <= 0 {
-		fmt.Fprintln(os.Stderr, "measure: --num-ctx is required (must exceed the prompt token count)")
-		return 2
-	}
-	if numPredict <= 0 {
-		fmt.Fprintln(os.Stderr, "measure: --num-predict is required (must exceed the natural output length)")
+	backend, model, ok := validateMeasureFlags("measure", instrumentFlag, samples, simThreshold, numCtx, numPredict)
+	if !ok {
 		return 2
 	}
 
@@ -489,4 +518,203 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 		Truncated:            truncated,
 		PromptUnderestimated: underestimated,
 	}, nil
+}
+
+// gateMeasureFlagNames lists the measure-specific CLI flags whose explicit
+// presence on a `gate` invocation, combined with no instrument resolving
+// (neither --instrument nor .tumanomir.yaml's instrument: section), signals
+// a silently-downgraded gate run rather than an intentional
+// deterministic-only invocation (REQ-GATE-02) — the same class of
+// measurement-integrity bug REQ-MSR-06 already treats as a bug, not a
+// warning. Scoped to CLI flags only (checked via fs.Visit, which reports
+// only flags actually set on this invocation, not their defaults): a
+// half-filled instrument: config section is tolerated silently, since a
+// config file is persistent ambient state, not an explicit signal on this
+// particular run the way a CLI flag is.
+var gateMeasureFlagNames = map[string]bool{
+	"n": true, "samples": true, "temp": true, "sim-threshold": true,
+	"num-ctx": true, "num-predict": true, "think": true, "d-pair-max": true,
+}
+
+// runGate parses flags, validates the positional spec-file argument,
+// constructs the real Ollama generator (used only if an instrument
+// resolves) and delegates to runGateImpl, mirroring runMeasure's own
+// split (issue #70's DI pattern).
+func runGate(args []string) int {
+	return runGateImpl(args, func(cfg internal.InstrumentConfig) instrument.Generator {
+		return instrument.NewOllama(cfg)
+	})
+}
+
+// runGateImpl is runGate's testable core (REQ-GATE-01/02/03): it runs the
+// deterministic layer unconditionally, then — only if an instrument
+// resolves from CLI flags or .tumanomir.yaml's instrument: section — the
+// stochastic layer too, combining both into one report.Report/exit code.
+// Mirrors runMeasureImpl's newGen dependency-injection split so tests can
+// drive the full path through a fake Generator without touching the
+// network.
+func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrument.Generator) int {
+	fileCfg, ok := resolveConfig(args, "gate")
+	if !ok {
+		return 2
+	}
+
+	th := internal.DefaultThresholds()
+	fileCfg.ApplyThresholds(&th)
+
+	// Same instrument-default seeding as runMeasureImpl (see its own
+	// comment): a config with only one of backend/model leaves
+	// instrumentDefault "", so gate correctly treats it as unresolved
+	// rather than composing a malformed "ollama:" or ":my-model" default.
+	seeded := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95})
+	instrumentDefault := ""
+	if seeded.Backend != "" && seeded.Model != "" {
+		instrumentDefault = seeded.Backend + ":" + seeded.Model
+	}
+
+	fs := flag.NewFlagSet("gate", flag.ExitOnError)
+
+	var (
+		configFlag     string
+		instrumentFlag string
+		samples        int
+		temp           float64
+		simThreshold   float64
+		numCtx         int
+		numPredict     int
+		think          bool
+	)
+	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
+	fs.Float64Var(&th.KDriftMax, "k-drift-max", th.KDriftMax, "max fraction of untraced requirements")
+	fs.Float64Var(&th.DConstMin, "d-const-min", th.DConstMin, "min lexical constraint density")
+	fs.StringVar(&instrumentFlag, "instrument", instrumentDefault, "format backend:model (e.g. ollama:qwen3-coder:30b); omit to run deterministic-only")
+	fs.IntVar(&samples, "n", seeded.Samples, "number of generations to sample, must be >=2")
+	fs.IntVar(&samples, "samples", seeded.Samples, "alias for -n")
+	fs.Float64Var(&temp, "temp", seeded.Temperature, "sampling temperature")
+	fs.Float64Var(&simThreshold, "sim-threshold", seeded.SimThreshold, "single-linkage clustering threshold, in [0,1]")
+	fs.IntVar(&numCtx, "num-ctx", seeded.NumCtx, "context window; must exceed the prompt token count")
+	fs.IntVar(&numPredict, "num-predict", seeded.NumPredict, "max generated tokens; must exceed natural output length")
+	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
+	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
+	_ = fs.Parse(args)
+
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "gate: exactly one <file.md> argument required")
+		return 2
+	}
+	path := fs.Arg(0)
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gate:", err)
+		return 2
+	}
+	if info.IsDir() {
+		fmt.Fprintf(os.Stderr, "gate: %s is a directory; gate takes a single spec file (directory aggregation is not methodologically meaningful for dispersion measurement in v0.1)\n", path)
+		return 2
+	}
+
+	if instrumentFlag == "" {
+		var contradicting string
+		fs.Visit(func(f *flag.Flag) {
+			if contradicting == "" && gateMeasureFlagNames[f.Name] {
+				contradicting = f.Name
+			}
+		})
+		if contradicting != "" {
+			fmt.Fprintf(os.Stderr, "gate: --%s was passed but no instrument resolved (no --instrument and no .tumanomir.yaml instrument: section) — refusing to silently downgrade to deterministic-only (REQ-GATE-02)\n", contradicting)
+			return 2
+		}
+	}
+
+	specs, err := spec.Load(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gate:", err)
+		return 2
+	}
+	cr := aggregate(specs, th)
+
+	var mrPtr *report.MeasureResult
+	if instrumentFlag != "" {
+		backend, model, ok := validateMeasureFlags("gate", instrumentFlag, samples, simThreshold, numCtx, numPredict)
+		if !ok {
+			return 2
+		}
+
+		cfg := internal.InstrumentConfig{
+			Backend:       backend,
+			Model:         model,
+			Temperature:   temp,
+			Samples:       samples,
+			Think:         think,
+			NumCtx:        numCtx,
+			NumPredict:    numPredict,
+			SimThreshold:  simThreshold,
+			Prompt:        instrument.PromptV1,
+			PromptVersion: instrument.PromptVersion,
+		}
+
+		// v0.1 ships only "ollama"; already validated above. Future backends
+		// would switch on cfg.Backend here.
+		gen := newGen(cfg)
+
+		mr, err := runMeasureWithGenerator(gen, cfg, specs[0].Content, samples, th)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "gate:", err)
+			return 2
+		}
+		mrPtr = &mr
+	}
+
+	var dpair *internal.Verdict
+	if mrPtr != nil {
+		dpair = &mrPtr.DPairVerdict
+	}
+	verdict, exitCode := gateVerdict(cr.KDVerdict, cr.DCVerdict, dpair)
+
+	rep := report.Report{Check: cr, Measure: mrPtr, Verdict: verdict, ExitCode: exitCode}
+	if err := report.RenderReport(os.Stdout, rep, th); err != nil {
+		fmt.Fprintln(os.Stderr, "gate:", err)
+		return 2
+	}
+
+	return exitCode
+}
+
+// gateVerdict combines the deterministic layer's K_drift/D_const verdicts
+// and (when the stochastic layer ran) D_pair's verdict into gate's headline
+// Verdict and exit code (REQ-GATE-03).
+//
+// exit_code is 1 iff K_drift or D_pair blocked — D_const/H/H_norm never
+// independently gate (REQ-CHK-06/REQ-MSR-02). The headline Verdict is the
+// worst-case precedence block > warn > skipped > ok over the FULL set {kd,
+// dc, dpair-if-present} — deliberately checked separately from exit_code so
+// an (impossible, but not type-guarded) dc == Block still surfaces as
+// headline Block (fail-loud) rather than silently downgrading to "ok",
+// while exit_code stays governed solely by kd/dpair.
+func gateVerdict(kd, dc internal.Verdict, dpair *internal.Verdict) (internal.Verdict, int) {
+	exitCode := 0
+	if kd == internal.VerdictBlock || (dpair != nil && *dpair == internal.VerdictBlock) {
+		exitCode = 1
+	}
+
+	all := []internal.Verdict{kd, dc}
+	if dpair != nil {
+		all = append(all, *dpair)
+	}
+	for _, v := range all {
+		if v == internal.VerdictBlock {
+			return internal.VerdictBlock, exitCode
+		}
+	}
+	for _, v := range all {
+		if v == internal.VerdictWarn {
+			return internal.VerdictWarn, exitCode
+		}
+	}
+	for _, v := range all {
+		if v == internal.VerdictSkipped {
+			return internal.VerdictSkipped, exitCode
+		}
+	}
+	return internal.VerdictOK, exitCode
 }

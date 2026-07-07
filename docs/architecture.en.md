@@ -51,19 +51,24 @@ updating `docs/requirements.md` first):
 ```
 tumanomir check [flags] <file.md|dir>   # deterministic layer: K_drift, D_const
 tumanomir measure [flags] <file.md>     # stochastic layer: D_pair, H_norm
+tumanomir gate [flags] <file.md>        # CI mode: check + measure (if an
+                                         # instrument resolves) in one pass,
+                                         # one exit code
 tumanomir version                       # print version and exit
 
-# check and measure
+# check, measure, and gate
 --config  string  path to a .tumanomir.yaml config file (default: load
                    ./.tumanomir.yaml if present, cwd only, no upward
                    search; a named --config path must exist and parse)
 
-# check
+# check (and gate)
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
 --d-const-min  float   warn: min lexical constraint density (default 0.35)
 
-# measure
---instrument     string  required, format backend:model (e.g. ollama:qwen3-coder:30b)
+# measure (and gate, once an instrument resolves)
+--instrument     string  format backend:model (e.g. ollama:qwen3-coder:30b);
+                          required for measure, optional for gate — an
+                          unresolved instrument runs gate deterministic-only
 -n, --samples    int     number of generations to sample, must be >=2 (default 10)
 --temp           float   sampling temperature (default 1.0)
 --sim-threshold  float   single-linkage clustering threshold, in [0,1] (default 0.95)
@@ -73,12 +78,17 @@ tumanomir version                       # print version and exit
 --d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
 ```
 
+`gate` fails with exit code 2 if any measure-specific flag above is passed
+explicitly while no instrument resolves (CLI flags or .tumanomir.yaml's
+instrument: section) — a silently-downgraded gate run is the same class of
+measurement-integrity bug as REQ-MSR-06 (REQ-GATE-02).
+
 Output is human-readable in a TTY; exit code: 0 ok / 1 gate failed / 2 error.
 
 ## Package architecture
 
 ```
-cmd/tumanomir/          CLI (stdlib flag, check/measure/version subcommands)
+cmd/tumanomir/          CLI (stdlib flag, check/measure/gate/version subcommands)
 internal/types.go       shared types (Verdict, Thresholds, InstrumentConfig,
                          KDriftResult, DConstResult, DispersionResult)
 internal/config/        loads .tumanomir.yaml (REQ-CFG-02/03)
@@ -86,7 +96,7 @@ internal/spec/          markdown specification loading (file or directory)
 internal/metrics/       K_drift (traceability linter), D_const (lexical scanner)
 internal/dispersion/    AST features, cosine, single-linkage, entropy, D_pair
 internal/instrument/    Generator interface, Ollama backend, PromptV1 + fence extractor
-internal/report/        renders CheckResult/MeasureResult into a TTY report (REQ-OUT-01)
+internal/report/        renders CheckResult/MeasureResult/Report into a TTY report (REQ-OUT-01)
 ```
 
 `internal/instrument` is the only package allowed to make network calls
@@ -97,7 +107,10 @@ Report rendering has been extracted into `internal/report`
 (`RenderCheck`/`RenderMeasure`, issue #82): the package depends only on
 `internal`, never on `internal/metrics`/`internal/spec` — `aggregate()`
 (the per-file aggregation logic) stays in `cmd/tumanomir`; only the
-`CheckResult` type it returns moved into `internal/report`.
+`CheckResult` type it returns moved into `internal/report`. `gate` (issue
+#87) adds `Report`/`RenderReport` on top — one `@schema Report` covering
+both layers in a single pass; `RenderCheck`/`RenderMeasure` are unchanged
+for standalone `check`/`measure`.
 
 Origin of the dispersion code: a port of
 `docs/investigation/_sanity/analyze/main.go` from the article's experiment.

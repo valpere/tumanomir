@@ -1211,3 +1211,178 @@ instrument:
 		t.Fatalf("gotCfg.Samples = %d, want 4 (CLI flag must override config's 10)", gotCfg.Samples)
 	}
 }
+
+// --- `gate` command (issue #87) ---
+
+// verdictPtr is a small helper so table rows can express "no dispersion
+// verdict at all" (nil) vs. an actual internal.Verdict value as a literal
+// without a separate variable per row.
+func verdictPtr(v internal.Verdict) *internal.Verdict { return &v }
+
+// TestGateVerdict is a Production-level table-driven test covering every
+// {kd, dc, dpair} combination that matters for gateVerdict's worst-case
+// precedence (block > warn > skipped > ok) and its exit-code rule (exit 1
+// iff kd or dpair blocks — dc/H/H_norm never independently gate).
+func TestGateVerdict(t *testing.T) {
+	tests := []struct {
+		name         string
+		kd, dc       internal.Verdict
+		dpair        *internal.Verdict
+		wantVerdict  internal.Verdict
+		wantExitCode int
+	}{
+		{"all ok, no instrument", internal.VerdictOK, internal.VerdictOK, nil, internal.VerdictOK, 0},
+		{"all ok, dpair ok", internal.VerdictOK, internal.VerdictOK, verdictPtr(internal.VerdictOK), internal.VerdictOK, 0},
+		{"kd blocks, no instrument", internal.VerdictBlock, internal.VerdictOK, nil, internal.VerdictBlock, 1},
+		{"dpair blocks", internal.VerdictOK, internal.VerdictOK, verdictPtr(internal.VerdictBlock), internal.VerdictBlock, 1},
+		{"kd and dpair both block", internal.VerdictBlock, internal.VerdictOK, verdictPtr(internal.VerdictBlock), internal.VerdictBlock, 1},
+		{"kd skipped, no instrument", internal.VerdictSkipped, internal.VerdictOK, nil, internal.VerdictSkipped, 0},
+		{"dpair skipped (too few valid samples)", internal.VerdictOK, internal.VerdictOK, verdictPtr(internal.VerdictSkipped), internal.VerdictSkipped, 0},
+		{"dc warns, no instrument", internal.VerdictOK, internal.VerdictWarn, nil, internal.VerdictWarn, 0},
+		{
+			// The explicit guard row (issue #87 acceptance criteria): dc == Block
+			// is impossible in practice (aggregate's D_const verdict is only ever
+			// ok/warn) but gateVerdict takes internal.Verdict, not a narrower
+			// type, so nothing stops it type-wise. This asserts the headline
+			// Verdict still fail-loudly surfaces Block (never silently
+			// downgraded to "ok") while exit_code stays 0 — D_const alone must
+			// never gate the exit code, matching REQ-CHK-06.
+			name: "dc block is impossible in practice but must not silently downgrade to ok",
+			kd:   internal.VerdictOK, dc: internal.VerdictBlock, dpair: nil,
+			wantVerdict: internal.VerdictBlock, wantExitCode: 0,
+		},
+		{"warn beats skipped in precedence", internal.VerdictSkipped, internal.VerdictWarn, nil, internal.VerdictWarn, 0},
+		{"block beats warn in precedence", internal.VerdictBlock, internal.VerdictWarn, nil, internal.VerdictBlock, 1},
+		{"block beats skipped in precedence", internal.VerdictSkipped, internal.VerdictOK, verdictPtr(internal.VerdictBlock), internal.VerdictBlock, 1},
+		{"dpair warn beats kd/dc skipped/ok in precedence", internal.VerdictSkipped, internal.VerdictOK, verdictPtr(internal.VerdictWarn), internal.VerdictWarn, 0},
+		{"dpair ok does not mask kd block", internal.VerdictBlock, internal.VerdictOK, verdictPtr(internal.VerdictOK), internal.VerdictBlock, 1},
+		{"dc warn does not gate exit code even alongside dpair ok", internal.VerdictOK, internal.VerdictWarn, verdictPtr(internal.VerdictOK), internal.VerdictWarn, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotVerdict, gotExitCode := gateVerdict(tt.kd, tt.dc, tt.dpair)
+			if gotVerdict != tt.wantVerdict || gotExitCode != tt.wantExitCode {
+				t.Fatalf("gateVerdict(%q, %q, %v) = (%q, %d), want (%q, %d)",
+					tt.kd, tt.dc, tt.dpair, gotVerdict, gotExitCode, tt.wantVerdict, tt.wantExitCode)
+			}
+		})
+	}
+}
+
+// TestRunGateImplDeterministicOnly covers gate's REQ-GATE-02
+// deterministic-only path: no --instrument and no .tumanomir.yaml
+// instrument: section, so gate must run only the deterministic layer and
+// never touch newGen at all.
+func TestRunGateImplDeterministicOnly(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	genCalled := false
+	out, code := captureStdout(t, func() int {
+		return runGateImpl([]string{specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			genCalled = true
+			return &fakeGenerator{fn: func(int) (instrument.Generation, error) { return genOK(goBlock(testSrcFoo)) }}
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+	if genCalled {
+		t.Fatal("newGen must never be called when no instrument resolves")
+	}
+	if !strings.Contains(out, "K_drift") {
+		t.Fatalf("want check content in the report, got:\n%s", out)
+	}
+	if strings.Contains(out, "Instrument config") {
+		t.Fatalf("must not print the instrument-config block in deterministic-only mode, got:\n%s", out)
+	}
+	if !strings.Contains(out, "exit code: 0 (gates pass)") {
+		t.Fatalf("want the exit-code line, got:\n%s", out)
+	}
+}
+
+// TestRunGateImplFullPath covers gate's full path: an instrument resolves
+// from CLI flags, so both layers run and the report contains both K_drift
+// and the instrument-config/D_pair block.
+func TestRunGateImplFullPath(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{
+		"--instrument", "ollama:m",
+		"--samples", "4",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+
+	out, code := captureStdout(t, func() int {
+		return runGateImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+			return &fakeGenerator{fn: func(int) (instrument.Generation, error) { return genOK(goBlock(testSrcFoo)) }}
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "K_drift") {
+		t.Fatalf("want check content, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Instrument config (REQ-MSR-04):") {
+		t.Fatalf("want the instrument-config block when an instrument resolves, got:\n%s", out)
+	}
+	if !strings.Contains(out, "D_pair:   0.00  [ok]") {
+		t.Fatalf("want a real (non-placeholder) D_pair line, got:\n%s", out)
+	}
+}
+
+// TestRunGateImplContradictionGuard covers REQ-GATE-02's contradiction
+// guard: a measure-specific CLI flag passed while no instrument resolves
+// must fail with exit code 2 rather than silently running
+// deterministic-only.
+func TestRunGateImplContradictionGuard(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int {
+		return runGateImpl([]string{"--samples", "5", specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called when the contradiction guard fires")
+			return nil
+		})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestRunGateImplDirectoryArgumentRejected guards gate's "never a
+// directory" restriction (same restriction measure already enforces),
+// extended uniformly to gate regardless of which mode it would otherwise run
+// in.
+func TestRunGateImplDirectoryArgumentRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	errOut, code := captureStderr(t, func() int {
+		return runGateImpl([]string{dir}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called when the directory-argument check fails")
+			return nil
+		})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}

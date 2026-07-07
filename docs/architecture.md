@@ -50,19 +50,25 @@ Roadmap (що ще не збудовано і в якому порядку) — 
 ```
 tumanomir check [flags] <file.md|dir>   # детермінований шар: K_drift, D_const
 tumanomir measure [flags] <file.md>     # стохастичний шар: D_pair, H_norm
+tumanomir gate [flags] <file.md>        # CI-режим: check + measure (якщо
+                                         # прилад визначено) за один прохід,
+                                         # один exit code
 tumanomir version                       # надрукувати версію і вийти
 
-# check і measure
+# check, measure і gate
 --config  string  шлях до .tumanomir.yaml (за замовчуванням: завантажити
                    ./.tumanomir.yaml, якщо є, лише поточна директорія, без
                    пошуку вгору; явний --config має існувати і парситись)
 
-# check
+# check (і gate)
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
 --d-const-min  float   warn: min lexical constraint density (default 0.35)
 
-# measure
---instrument     string  required, format backend:model (e.g. ollama:qwen3-coder:30b)
+# measure (і gate, якщо прилад визначено)
+--instrument     string  format backend:model (e.g. ollama:qwen3-coder:30b);
+                          обов'язковий для measure, опційний для gate —
+                          невизначений прилад запускає gate тільки
+                          детерміновано
 -n, --samples    int     number of generations to sample, must be >=2 (default 10)
 --temp           float   sampling temperature (default 1.0)
 --sim-threshold  float   single-linkage clustering threshold, in [0,1] (default 0.95)
@@ -72,12 +78,18 @@ tumanomir version                       # надрукувати версію і
 --d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
 ```
 
+`gate` падає з exit code 2, якщо будь-який measure-специфічний прапорець
+вище передано явно, а прилад не визначився (ні CLI, ні `instrument:` у
+`.tumanomir.yaml`) — тихе пониження gate до детермінованого режиму
+вважається такою ж проблемою цілісності виміру, як і в REQ-MSR-06
+(REQ-GATE-02).
+
 Вивід — людський у TTY; exit code: 0 ok / 1 gate failed / 2 error.
 
 ## Архітектура пакетів
 
 ```
-cmd/tumanomir/          CLI (stdlib flag, підкоманди check/measure/version)
+cmd/tumanomir/          CLI (stdlib flag, підкоманди check/measure/gate/version)
 internal/types.go       спільні типи (Verdict, Thresholds, InstrumentConfig,
                          KDriftResult, DConstResult, DispersionResult)
 internal/config/        завантаження .tumanomir.yaml (REQ-CFG-02/03)
@@ -85,7 +97,7 @@ internal/spec/          завантаження markdown-специфікаці
 internal/metrics/       K_drift (лінтер трасування), D_const (лексичний сканер)
 internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair
 internal/instrument/    інтерфейс Generator, Ollama-бекенд, PromptV1 + фрейм-екстрактор
-internal/report/        рендеринг CheckResult/MeasureResult у TTY-звіт (REQ-OUT-01)
+internal/report/        рендеринг CheckResult/MeasureResult/Report у TTY-звіт (REQ-OUT-01)
 ```
 
 `internal/instrument` — єдиний пакет, якому дозволено мережу
@@ -96,7 +108,10 @@ internal/report/        рендеринг CheckResult/MeasureResult у TTY-зв
 issue #82): пакет залежить лише від `internal`, ніколи від
 `internal/metrics`/`internal/spec` — `aggregate()` (агрегація по файлах)
 лишається в `cmd/tumanomir`, у `internal/report` переїхав тільки тип
-`CheckResult`, який вона повертає.
+`CheckResult`, який вона повертає. `gate` (issue #87) додає над цим
+`Report`/`RenderReport` — єдиний `@schema Report` для обох шарів в один
+прохід; `RenderCheck`/`RenderMeasure` лишаються без змін для самостійних
+`check`/`measure`.
 
 Походження коду dispersion: порт `docs/investigation/_sanity/analyze/main.go`
 з експерименту статті.

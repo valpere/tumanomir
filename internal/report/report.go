@@ -56,7 +56,21 @@ func (ew *errWriter) println(a ...any) {
 // process-exit concerns. Returns the first error writing to w, if any.
 func RenderCheck(w io.Writer, r CheckResult, th internal.Thresholds) error {
 	ew := &errWriter{w: w}
+	writeCheckMetrics(ew, r, th, true)
+	return ew.err
+}
 
+// writeCheckMetrics writes the K_drift/D_const lines and the hanging-ID
+// list shared by RenderCheck (standalone `check`) and RenderReport (`gate`,
+// issue #87) — extracted so the two callers can't drift apart on this
+// block's format. showDPairPlaceholder controls the "D_pair: — (stochastic
+// layer: run measure...)" line, printed between D_const and the hanging-ID
+// list to match RenderCheck's original byte-for-byte output: it's accurate
+// whenever no measurement was even attempted (RenderCheck always, and
+// RenderReport's Measure == nil branch), but would misrepresent a `gate` run
+// that did measure D_pair, so RenderReport passes false there and lets
+// writeMeasureMetrics print the real value instead.
+func writeCheckMetrics(ew *errWriter, r CheckResult, th internal.Thresholds, showDPairPlaceholder bool) {
 	if r.KDVerdict == internal.VerdictSkipped {
 		ew.printf("  K_drift:  —     [n/a]%s(no [REQ-*] tags found)\n", pad(r.KDVerdict))
 	} else {
@@ -65,13 +79,13 @@ func RenderCheck(w io.Writer, r CheckResult, th internal.Thresholds) error {
 	}
 	ew.printf("  D_const:  %.2f  [%s]%s(threshold %.2f, %d markers / %d prose tokens)\n",
 		r.DC.Value, r.DCVerdict, pad(r.DCVerdict), th.DConstMin, r.DC.ConstraintMarkers, r.DC.ProseTokens)
-	ew.printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)\n")
+	if showDPairPlaceholder {
+		ew.printf("  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)\n")
+	}
 
 	for _, id := range r.KD.HangingIDs {
 		ew.printf("    hanging: %s\n", id)
 	}
-
-	return ew.err
 }
 
 // RenderMeasure writes REQ-MSR-04's instrument config, the discard-rate and
@@ -91,8 +105,17 @@ func RenderCheck(w io.Writer, r CheckResult, th internal.Thresholds) error {
 // Returns the first error writing to w, if any.
 func RenderMeasure(w io.Writer, r MeasureResult, th internal.Thresholds) error {
 	ew := &errWriter{w: w}
-	cfg := r.Config
+	writeMeasureWarnings(ew, r)
+	writeMeasureMetrics(ew, r, th)
+	return ew.err
+}
 
+// writeMeasureWarnings writes the discard-rate (REQ-MSR-05),
+// done_reason=length truncation (REQ-MSR-06), and prompt-underestimate
+// (issue #57) warning lines shared by RenderMeasure and RenderReport
+// (issue #87) — see RenderMeasure's own doc comment for why these three
+// stay on separate lines rather than folded together.
+func writeMeasureWarnings(ew *errWriter, r MeasureResult) {
 	if r.DiscardWarn {
 		ew.printf("⚠ discard rate: %.0f%% (%d/%d generations invalid) — exceeds the %.0f%% hypothesis threshold (REQ-MSR-05); results may be unreliable\n\n",
 			r.DiscardRate*100, r.Dispersion.Discarded, r.Dispersion.Discarded+r.Dispersion.N, internal.DiscardWarnThreshold*100)
@@ -107,6 +130,14 @@ func RenderMeasure(w io.Writer, r MeasureResult, th internal.Thresholds) error {
 		ew.printf("⚠ %d generation(s) had an actual prompt-token count over %.1fx the preflight estimate — the byte/3 heuristic under-counts non-ASCII (e.g. Cyrillic) prompts and may not have caught a real truncation risk; verify --num-ctx has enough headroom\n\n",
 			r.PromptUnderestimated, internal.PromptEstimateDivergenceFactor)
 	}
+}
+
+// writeMeasureMetrics writes REQ-MSR-04's instrument-config block and the
+// D_pair/H/H_norm lines shared by RenderMeasure and RenderReport (issue
+// #87). H and H_norm are always printed as ordinal/advisory signals — they
+// never gate, per the methodological invariant in CLAUDE.md.
+func writeMeasureMetrics(ew *errWriter, r MeasureResult, th internal.Thresholds) {
+	cfg := r.Config
 
 	ew.println("Instrument config (REQ-MSR-04):")
 	ew.printf("  backend:        %s\n", cfg.Backend)
@@ -124,13 +155,36 @@ func RenderMeasure(w io.Writer, r MeasureResult, th internal.Thresholds) error {
 			internal.VerdictSkipped, pad(internal.VerdictSkipped), r.Dispersion.N)
 		ew.printf("  H:        —     [%s]%s(ordinal signal only, not gated)\n", internal.VerdictSkipped, pad(internal.VerdictSkipped))
 		ew.printf("  H_norm:   —     [%s]%s(ordinal signal only, not gated)\n", internal.VerdictSkipped, pad(internal.VerdictSkipped))
-		return ew.err
+		return
 	}
 
 	ew.printf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)\n",
 		r.Dispersion.DPair, r.DPairVerdict, pad(r.DPairVerdict), th.DPairMax, r.Dispersion.MeanSim, r.Dispersion.N, r.Dispersion.Discarded)
 	ew.printf("  H:        %.2f  bits (ordinal signal only, not gated)\n", r.Dispersion.H)
 	ew.printf("  H_norm:   %.2f  (ordinal signal only, not gated)\n", r.Dispersion.HNorm)
+}
+
+// RenderReport writes gate's unified report (REQ-GATE-01): the deterministic
+// layer's K_drift/D_const lines, and — only when r.Measure is non-nil, i.e.
+// the stochastic layer actually ran — the discard/truncation/prompt
+// warnings and D_pair/H/H_norm lines, followed by the exit-code line. Unlike
+// RenderCheck/RenderMeasure, RenderReport does print the exit code: Report
+// already carries Verdict/ExitCode as data (gateVerdict's output), and
+// gate's whole purpose is one CI-parseable block rather than a caller
+// deciding exit-code semantics separately.
+func RenderReport(w io.Writer, r Report, th internal.Thresholds) error {
+	ew := &errWriter{w: w}
+	writeCheckMetrics(ew, r.Check, th, r.Measure == nil)
+	if r.Measure != nil {
+		writeMeasureWarnings(ew, *r.Measure)
+		writeMeasureMetrics(ew, *r.Measure, th)
+	}
+
+	if r.ExitCode == 0 {
+		ew.printf("\nexit code: 0 (gates pass)\n")
+	} else {
+		ew.printf("\nexit code: %d (gate failed)\n", r.ExitCode)
+	}
 
 	return ew.err
 }
