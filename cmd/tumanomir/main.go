@@ -11,12 +11,17 @@ import (
 	"strings"
 
 	"github.com/valpere/tumanomir/internal"
+	"github.com/valpere/tumanomir/internal/config"
 	"github.com/valpere/tumanomir/internal/dispersion"
 	"github.com/valpere/tumanomir/internal/instrument"
 	"github.com/valpere/tumanomir/internal/metrics"
 	"github.com/valpere/tumanomir/internal/report"
 	"github.com/valpere/tumanomir/internal/spec"
 )
+
+// defaultConfigPath is the cwd-only (no upward directory walk) location
+// checked for an implicit config file when --config isn't given.
+const defaultConfigPath = ".tumanomir.yaml"
 
 // version is printed by the `version` subcommand and `-h`/`--help`/`help`.
 // Bump alongside any user-visible CLI or behavior change.
@@ -32,6 +37,11 @@ Usage:
   tumanomir measure [flags] <file.md>     stochastic layer: D_pair, H_norm
   tumanomir version
 
+Flags for check and measure:
+  --config  string  path to a .tumanomir.yaml config file (default: load
+                     ./.tumanomir.yaml if present, cwd only, no upward
+                     search; a named --config path must exist and parse)
+
 Flags for check:
   --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
   --d-const-min  float   warn: min lexical constraint density (default 0.35)
@@ -45,6 +55,9 @@ Flags for measure:
   --num-predict    int     required: max generated tokens; must exceed natural output length
   --think          bool    enable reasoning-model think mode (default false)
   --d-pair-max     float   gate: max 1-minus-mean-pairwise-AST-similarity (default 0.30)
+
+Flag precedence: CLI flag > .tumanomir.yaml > built-in default. See
+.tumanomir.yaml's schema in docs/requirements.md (REQ-CFG-02/03).
 
 Default thresholds are uncalibrated hypotheses from the methodology
 article; tune them on your own spec corpus.
@@ -83,6 +96,60 @@ func dispatch(args []string) int {
 	}
 }
 
+// scanConfigFlag manually pre-scans args for an explicit --config value
+// before the real FlagSet exists — needed because flag defaults must be
+// resolved (from config.Load) *before* the fs.*Var calls that register
+// them, and flag.Parse's own parsing happens too late for that. Supports
+// both "--config value" and "--config=value" (and their single-dash
+// spellings, since Go's flag package treats -x and --x identically).
+// Unlike flag.Parse, it does not stop at the first non-flag token — a
+// value belonging to some other, arity-unknown-to-this-scan flag (e.g.
+// "--k-drift-max 0.5") must not be mistaken for the end of the flag
+// section.
+func scanConfigFlag(args []string) (path string, ok bool) {
+	for i, a := range args {
+		if a == "--" {
+			break
+		}
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		name := strings.TrimLeft(a, "-")
+		if v, found := strings.CutPrefix(name, "config="); found {
+			return v, true
+		}
+		if name == "config" && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+// resolveConfig implements the --config discovery/precedence rule
+// (REQ-CFG-02): an explicit --config path is authoritative and must
+// exist/parse; otherwise ./.tumanomir.yaml (cwd only, no upward walk) is
+// loaded if present and silently skipped if absent. On failure it prints
+// an actionable, cmdName-prefixed message to stderr (matching this file's
+// existing error-reporting convention) and returns ok=false, so the
+// caller can return exit code 2 immediately.
+func resolveConfig(args []string, cmdName string) (cfg config.Config, ok bool) {
+	path, explicit := scanConfigFlag(args)
+	if !explicit {
+		path = defaultConfigPath
+		if _, err := os.Stat(path); err != nil {
+			return config.Config{}, true // no default config file: silently skip
+		}
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		// err (os.PathError or config.Load's own "parse %s: %w" wrap)
+		// already names path, so it isn't repeated here.
+		fmt.Fprintf(os.Stderr, "%s: config: %v\n", cmdName, err)
+		return config.Config{}, false
+	}
+	return cfg, true
+}
+
 // runCheck implements the `check` subcommand: the deterministic layer
 // (K_drift, D_const) — zero network, zero LLM. Parses flags, loads the
 // spec(s) via spec.Load, delegates to aggregate for the pure metric
@@ -90,8 +157,16 @@ func dispatch(args []string) int {
 // (0 pass, 1 gate failed, 2 error) rather than calling os.Exit directly,
 // so it's directly testable (see main_test.go's TestRunCheck* tests).
 func runCheck(args []string) int {
+	cfg, ok := resolveConfig(args, "check")
+	if !ok {
+		return 2
+	}
+
 	th := internal.DefaultThresholds()
+	cfg.ApplyThresholds(&th)
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	var configFlag string
+	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.Float64Var(&th.KDriftMax, "k-drift-max", th.KDriftMax, "max fraction of untraced requirements")
 	fs.Float64Var(&th.DConstMin, "d-const-min", th.DConstMin, "min lexical constraint density")
 	_ = fs.Parse(args)
@@ -183,10 +258,35 @@ func runMeasure(args []string) int {
 // construction, and the exit-code branch through a fake Generator without
 // touching the network (issue #70).
 func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instrument.Generator) int {
+	fileCfg, ok := resolveConfig(args, "measure")
+	if !ok {
+		return 2
+	}
+
 	th := internal.DefaultThresholds()
+	fileCfg.ApplyThresholds(&th)
+
+	// Seed the instrument flag defaults from the config file, layered over
+	// v0.1's built-in defaults — mirrors runCheck's th/ApplyThresholds
+	// seeding, but per-field rather than via a single struct pointer since
+	// these flags aren't backed by one InstrumentConfig variable.
+	seeded := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95})
+	// The combined "backend:model" default is composed only when the
+	// config set BOTH parts — a config with only one of the two leaves
+	// this "" so the existing "--instrument is required" error still
+	// fires, rather than producing a malformed default like "ollama:" or
+	// ":my-model" that would bypass that clear error for a confusing
+	// downstream backend:model-format parse failure instead (fix-review,
+	// glm-5.1:cloud + deepseek-v4-flash:cloud, independently).
+	instrumentDefault := ""
+	if seeded.Backend != "" && seeded.Model != "" {
+		instrumentDefault = seeded.Backend + ":" + seeded.Model
+	}
+
 	fs := flag.NewFlagSet("measure", flag.ExitOnError)
 
 	var (
+		configFlag     string
 		instrumentFlag string
 		samples        int
 		temp           float64
@@ -195,14 +295,15 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		numPredict     int
 		think          bool
 	)
-	fs.StringVar(&instrumentFlag, "instrument", "", "required, format backend:model (e.g. ollama:qwen3-coder:30b)")
-	fs.IntVar(&samples, "n", 10, "number of generations to sample, must be >=2")
-	fs.IntVar(&samples, "samples", 10, "alias for -n")
-	fs.Float64Var(&temp, "temp", 1.0, "sampling temperature")
-	fs.Float64Var(&simThreshold, "sim-threshold", 0.95, "single-linkage clustering threshold, in [0,1]")
-	fs.IntVar(&numCtx, "num-ctx", 0, "required: context window; must exceed the prompt token count")
-	fs.IntVar(&numPredict, "num-predict", 0, "required: max generated tokens; must exceed natural output length")
-	fs.BoolVar(&think, "think", false, "enable reasoning-model think mode")
+	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
+	fs.StringVar(&instrumentFlag, "instrument", instrumentDefault, "required, format backend:model (e.g. ollama:qwen3-coder:30b)")
+	fs.IntVar(&samples, "n", seeded.Samples, "number of generations to sample, must be >=2")
+	fs.IntVar(&samples, "samples", seeded.Samples, "alias for -n")
+	fs.Float64Var(&temp, "temp", seeded.Temperature, "sampling temperature")
+	fs.Float64Var(&simThreshold, "sim-threshold", seeded.SimThreshold, "single-linkage clustering threshold, in [0,1]")
+	fs.IntVar(&numCtx, "num-ctx", seeded.NumCtx, "required: context window; must exceed the prompt token count")
+	fs.IntVar(&numPredict, "num-predict", seeded.NumPredict, "required: max generated tokens; must exceed natural output length")
+	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	_ = fs.Parse(args)
 

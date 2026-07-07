@@ -16,10 +16,11 @@ end-to-end проти реального Ollama. Деталі — [`architecture
 
 ## Near-term — логічний наступний крок
 
-1. **`.tumanomir.yaml` конфіг + команда `gate`.** CI-режим: один
-   конфіг-файл замість повторення `--k-drift-max`/`--instrument`/... у
-   кожному виклику; `gate` = `check`+`measure` за один прохід з одним
-   exit code для CI. `internal/report` (рендеринг `CheckResult`/
+1. **Команда `gate`.** `.tumanomir.yaml`-конфіг (один конфіг-файл замість
+   повторення `--k-drift-max`/`--instrument`/... у кожному виклику) вже
+   реалізовано (`internal/config`, REQ-CFG-02/03); лишається `gate` =
+   `check`+`measure` за один прохід з одним exit code для CI.
+   `internal/report` (рендеринг `CheckResult`/
    `MeasureResult`, issue #82) вже винесено з `cmd/tumanomir/main.go` —
    передумову для уникнення дублювання рендеринг-логіки закрито;
    `gate` додає над цим єдиний `report.Render`/`Report`-формат
