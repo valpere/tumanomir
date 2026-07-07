@@ -174,10 +174,11 @@ for exactly that reason.
     -> [FUN-OUT-01] internal/report.RenderCheck(w io.Writer, r CheckResult,
        th Thresholds) error and internal/report.RenderMeasure(w io.Writer,
        r MeasureResult, th Thresholds) error, called from cmd/tumanomir's
-       runCheck/runMeasureImpl. A unified report.Render(w, Report) over
-       the single @schema Report shape above stays future work for the
-       `gate` command (see roadmap) — check and measure currently render
-       structurally different content.
+       runCheck/runMeasureImpl; internal/report.RenderReport(w io.Writer, r
+       Report, th Thresholds) error, called from runGate, over the unified
+       @schema Report shape above (REQ-GATE-01). check and measure keep
+       rendering their own structurally different content standalone —
+       RenderReport is additive, not a replacement.
 
 14. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
     failed, 2 = execution error. CI-composable by construction.
@@ -230,11 +231,52 @@ for exactly that reason.
        cmd/tumanomir's runCheck/runMeasureImpl before their fs.*Var
        registrations
 
+### 2.5 Gate command (CI mode)
+
+18. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
+    D_const) and, when an instrument is configured, the stochastic
+    layer (D_pair, H_norm) in one process invocation over one spec
+    file, producing one unified Report (@schema Report) and one exit
+    code — the CI-composable entry point REQ-OUT-02 already specifies
+    the exit-code contract for.
+    -> [FUN-GATE-01] cmd/tumanomir's runGate; internal/report.Report,
+       internal/report.RenderReport(w io.Writer, r Report, th
+       internal.Thresholds) error
+
+    `gate` takes exactly one `<file.md>` argument, never a directory —
+    the same restriction `measure` already enforces (see
+    runMeasureImpl's directory check), extended to `gate` uniformly
+    regardless of which mode it runs in.
+
+19. [REQ-GATE-02] `gate` must run in deterministic-only mode —
+    Report.dispersion left null — when no instrument is resolvable from
+    CLI flags or `.tumanomir.yaml`'s `instrument:` section. If any
+    measure-specific CLI flag (`--samples`/`-n`, `--temp`,
+    `--sim-threshold`, `--num-ctx`, `--num-predict`, `--think`,
+    `--d-pair-max`) is explicitly passed while no instrument resolves,
+    `gate` must fail with exit code 2 rather than silently discarding
+    it — a silently-downgraded gate run is the same class of
+    measurement-integrity bug REQ-MSR-06 already treats as a bug, not a
+    warning.
+    -> [FUN-GATE-02] cmd/tumanomir's runGate instrument-resolution and
+       contradiction-check logic (fs.Visit over measure-specific flags)
+
+20. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
+    KDVerdict, DCVerdict, and (when the stochastic layer ran)
+    DPairVerdict by worst-case precedence block > warn > skipped > ok
+    over that full set. exit_code is 1 if and only if KDVerdict ==
+    block or DPairVerdict == block — DCVerdict and H/H_norm (never
+    Verdict-bearing) must never independently produce exit_code == 1,
+    consistent with REQ-CHK-06/REQ-MSR-02. exit_code == 2 is reserved
+    for execution errors that never reach a rendered Report.
+    -> [FUN-GATE-03] cmd/tumanomir's gateVerdict(kd, dc internal.Verdict,
+       dpair *internal.Verdict) (internal.Verdict, int)
+
 ---
 
 ## 3. Non-functional requirements
 
-18. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+21. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -257,7 +299,7 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-19. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+22. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
     (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
@@ -265,7 +307,7 @@ for exactly that reason.
     -> [PHY-NFR-02] go.mod with exactly one external require:
        gopkg.in/yaml.v3
 
-20. [REQ-NFR-03] Methodology invariants must not be silently changed:
+23. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.
@@ -275,8 +317,6 @@ for exactly that reason.
 
 ## 4. Out of scope for v0.1 (roadmap)
 
-- `gate` command (CI mode) — `.tumanomir.yaml` config file support has
-  shipped (REQ-CFG-02/03); `gate` itself is still pending.
 - baseline calibration (`calibrate` command), bootstrap CIs
 - graph-based D_const (RFLP/Neo4j), assisted K_drift (LLM parser)
 - non-Ollama instruments, non-Go projections (SQL DDL, OpenAPI)

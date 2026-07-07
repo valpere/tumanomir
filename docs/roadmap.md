@@ -11,47 +11,36 @@
 
 ## v0.1 — зроблено
 
-`check` (K_drift, D_const) і `measure` (D_pair, H_norm) обидва працюють
+`check` (K_drift, D_const), `measure` (D_pair, H_norm) і `gate` (обидва
+шари за один прохід, один exit code для CI, REQ-GATE-01..03) працюють
 end-to-end проти реального Ollama. Деталі — [`architecture.md`](architecture.md).
-
-## Near-term — логічний наступний крок
-
-1. **Команда `gate`.** `.tumanomir.yaml`-конфіг (один конфіг-файл замість
-   повторення `--k-drift-max`/`--instrument`/... у кожному виклику) вже
-   реалізовано (`internal/config`, REQ-CFG-02/03); лишається `gate` =
-   `check`+`measure` за один прохід з одним exit code для CI.
-   `internal/report` (рендеринг `CheckResult`/
-   `MeasureResult`, issue #82) вже винесено з `cmd/tumanomir/main.go` —
-   передумову для уникнення дублювання рендеринг-логіки закрито;
-   `gate` додає над цим єдиний `report.Render`/`Report`-формат
-   (`@schema Report` у requirements.md).
 
 ## Mid-term — обговорено, не заплановано
 
-2. **`tumanomir calibrate`.** Пороги 0.20/0.35/0.30 — гіпотези зі статті,
+1. **`tumanomir calibrate`.** Пороги 0.20/0.35/0.30 — гіпотези зі статті,
    не каліброві на реальних даних команди. `calibrate` прогнав би `measure`
    на розміченому корпусі (відомо-чіткі vs відомо-туманні специфікації) і
    запропонував пороги, специфічні для домену/команди. Потребує накопиченої
    історії реальних вимірів (issue не заведено — чекає на достатній обсяг
    використання `measure` "в бою").
-3. **Bootstrap CI для D_pair.** N=10 генерацій — точкова оцінка з помітним
+2. **Bootstrap CI для D_pair.** N=10 генерацій — точкова оцінка з помітним
    семплінговим шумом (видно навіть у `docs/investigation/_sanity/README.md`
    при порівнянні приладів A/B). Довірчий інтервал замість одного числа
    зробив би репорт чеснішим щодо невизначеності.
 
 ## Exploratory — ідея зі статті, не оцінена
 
-4. **RFLP-граф (Neo4j) для повного D_const.** Поточний D_const —
+3. **RFLP-граф (Neo4j) для повного D_const.** Поточний D_const —
    лексичний проксі (маркери/проза). Повний граф
    Requirement-Flow-Linkage-Property дав би структурний вимір густини
    обмежень замість лексичного наближення.
-5. **Assisted-режим K_drift (LLM-парсер).** Поточний K_drift вимагає явної
+4. **Assisted-режим K_drift (LLM-парсер).** Поточний K_drift вимагає явної
    розмітки `[REQ-*] -> [FUN/LOG/PHY-*]`. LLM-асистований парсер міг би
    виводити трасування зі специфікацій без розмітки — ціна: втрата
    детермінізму deterministic-шару (REQ-CHK-01..06 явно вимагають zero-LLM).
-6. **Інші прилади.** OpenAI/Anthropic API поруч з Ollama —
+5. **Інші прилади.** OpenAI/Anthropic API поруч з Ollama —
    `instrument.Generator` вже спроєктований як pluggable interface саме
    для цього.
-7. **Інші проєкції.** SQL DDL, OpenAPI замість тільки Go type definitions
+6. **Інші проєкції.** SQL DDL, OpenAPI замість тільки Go type definitions
    як ціль генерації для `measure` — розширює застосовність за межі
    Go-проєктів.
