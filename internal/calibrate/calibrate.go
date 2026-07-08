@@ -77,7 +77,7 @@ func LoadCorpus(path string) (rows []Row, skipped int, err error) {
 			baseline = raw.Instrument
 			haveBaseline = true
 		} else if raw.Instrument != baseline {
-			return nil, 0, fmt.Errorf("calibrate: corpus mixes instruments %q and %q — all rows in one run must share the same instrument (REQ-MSR-04)", baseline, raw.Instrument)
+			return nil, 0, fmt.Errorf("corpus mixes instruments %q and %q — all rows in one run must share the same instrument (REQ-MSR-04)", baseline, raw.Instrument)
 		}
 
 		// raw and Row share identical fields (differing only in JSON
@@ -100,7 +100,7 @@ func BuildAnalyzedRows(rows []Row) ([]AnalyzedRow, error) {
 	for _, r := range rows {
 		specs, err := spec.Load(r.SpecPath)
 		if err != nil {
-			return nil, fmt.Errorf("calibrate: load %s: %w", r.SpecPath, err)
+			return nil, fmt.Errorf("load %s: %w", r.SpecPath, err)
 		}
 		var content []byte
 		for _, s := range specs {
