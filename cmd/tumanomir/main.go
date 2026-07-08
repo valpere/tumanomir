@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/valpere/tumanomir/internal"
+	"github.com/valpere/tumanomir/internal/calibrate"
 	"github.com/valpere/tumanomir/internal/config"
 	"github.com/valpere/tumanomir/internal/dispersion"
 	"github.com/valpere/tumanomir/internal/instrument"
@@ -39,6 +40,12 @@ Usage:
   tumanomir gate [flags] <file.md>        CI mode: check + measure (if an
                                            instrument resolves) in one pass,
                                            one unified exit code
+  tumanomir calibrate <corpus.jsonl>      correlate K_drift/D_const/D_pair
+                                           against a labeled historical
+                                           corpus (Spearman rank
+                                           correlation + median split);
+                                           informs, never auto-sets, a
+                                           threshold — no LLM involved
   tumanomir version
 
 Flags for check, measure, and gate:
@@ -70,6 +77,18 @@ explicitly while no instrument resolves (CLI flags or .tumanomir.yaml's
 instrument: section) — a silently-downgraded gate run is a
 measurement-integrity bug, not a convenience (REQ-GATE-02).
 
+calibrate takes no instrument-related flags: d_pair is read from the
+corpus, never re-measured. Corpus format is JSONL, one row per historical
+spec: {"spec_path":"...","instrument":"ollama:qwen3-coder:30b",
+"d_pair":0.27,"outcome":0.8}. spec_path must point to an immutable
+snapshot of the spec that produced the paired d_pair/outcome; all rows
+must share one instrument value (a second, distinct value anywhere in the
+corpus aborts with exit code 2, see docs/requirements.md REQ-CAL-02).
+Malformed rows are skipped and counted, never silently dropped; zero
+valid rows is exit code 2. calibrate never writes to .tumanomir.yaml or
+proposes a single threshold — its output is meant to inform a human
+choice, not replace one.
+
 Flag precedence: CLI flag > .tumanomir.yaml > built-in default. See
 .tumanomir.yaml's schema in docs/requirements.md (REQ-CFG-02/03).
 
@@ -100,6 +119,8 @@ func dispatch(args []string) int {
 		return runMeasure(args[1:])
 	case "gate":
 		return runGate(args[1:])
+	case "calibrate":
+		return runCalibrate(args[1:])
 	case "version":
 		fmt.Println("tumanomir", version)
 		return 0
@@ -804,4 +825,67 @@ func gateVerdict(kd, dc internal.Verdict, dpair *internal.Verdict) (internal.Ver
 		}
 	}
 	return internal.VerdictOK, exitCode
+}
+
+// runCalibrate implements the `calibrate` subcommand (REQ-CAL-*): loads a
+// JSONL corpus of historical spec snapshots each paired with a
+// pre-measured D_pair and a caller-defined downstream outcome score,
+// recomputes K_drift/D_const fresh from each snapshot, and reports how
+// well each of the three metrics actually correlates (Spearman rank
+// correlation) with the outcome — informing, never auto-setting, a
+// threshold choice (REQ-NFR-03). Takes exactly one positional
+// <corpus.jsonl> argument; no instrument-related flags, since calibrate
+// never calls an LLM (D_pair comes pre-computed from the corpus, never
+// re-measured). Always exits 0 on a successful run — calibrate reports,
+// it doesn't gate — and 2 on any load/argument error.
+func runCalibrate(args []string) int {
+	fs := flag.NewFlagSet("calibrate", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "calibrate: exactly one <corpus.jsonl> argument required")
+		return 2
+	}
+
+	rows, skipped, err := calibrate.LoadCorpus(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "calibrate:", err)
+		return 2
+	}
+	if len(rows) == 0 {
+		fmt.Fprintf(os.Stderr, "calibrate: zero valid rows in corpus (%d skipped) — nothing to correlate\n", skipped)
+		return 2
+	}
+
+	analyzed, err := calibrate.BuildAnalyzedRows(rows)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "calibrate:", err)
+		return 2
+	}
+
+	renderCalibration(calibrate.Analyze(analyzed), skipped)
+	return 0
+}
+
+// renderCalibration prints calibrate's CalibrationResult as plain text to
+// stdout. Kept inline in main.go rather than added to internal/report:
+// unlike RenderCheck/RenderMeasure, this rendering has exactly one caller
+// and no --format json variant (out of scope for this command), so
+// extracting it would add an internal/report -> internal/calibrate
+// dependency the report package's own doc comment deliberately avoids (it
+// depends only on internal) without buying any reuse — and it takes no
+// io.Writer parameter for the same single-caller reason (this file's
+// other direct-to-stdout prints, e.g. the `version` subcommand, follow
+// the same pattern).
+func renderCalibration(r calibrate.CalibrationResult, skipped int) {
+	fmt.Printf("Calibration over %d valid row(s), %d skipped\n\n", r.Rows, skipped)
+	if r.SmallSample {
+		fmt.Printf("⚠ fewer than %d valid rows — correlation coefficients below are not statistically meaningful yet\n\n", calibrate.MinRowsForCalibration)
+	}
+	for _, m := range r.Metrics {
+		fmt.Printf("%-8s  spearman=%+.2f\n", m.Name, m.Correlation)
+		fmt.Printf("  outcome <= median:  min=%.2f mean=%.2f max=%.2f\n", m.LowHalf.Min, m.LowHalf.Mean, m.LowHalf.Max)
+		fmt.Printf("  outcome >  median:  min=%.2f mean=%.2f max=%.2f\n\n", m.HighHalf.Min, m.HighHalf.Mean, m.HighHalf.Max)
+	}
+	fmt.Println("No threshold is auto-selected or written to .tumanomir.yaml — use these numbers to inform your own choice (REQ-NFR-03).")
 }

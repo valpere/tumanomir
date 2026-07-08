@@ -57,6 +57,11 @@ tumanomir measure [flags] <file.md>     # stochastic layer: D_pair, H_norm
 tumanomir gate [flags] <file.md>        # CI mode: check + measure (if an
                                          # instrument resolves) in one pass,
                                          # one exit code
+tumanomir calibrate <corpus.jsonl>      # correlate K_drift/D_const/D_pair
+                                         # against a labeled historical
+                                         # corpus (Spearman + median split);
+                                         # informs, never auto-sets, a
+                                         # threshold — no LLM involved
 tumanomir version                       # print version and exit
 
 # check, measure, and gate
@@ -89,6 +94,15 @@ explicitly while no instrument resolves (CLI flags or .tumanomir.yaml's
 instrument: section) — a silently-downgraded gate run is the same class of
 measurement-integrity bug as REQ-MSR-06 (REQ-GATE-02).
 
+`calibrate` takes no instrument-related flags: `d_pair` is read from its
+corpus, never re-measured. Corpus format is JSONL, one row per historical
+spec — `spec_path` must point to an immutable snapshot of the spec that
+produced the paired `d_pair`/`outcome`; all rows must share one
+`instrument` value (a second, distinct value anywhere in the corpus aborts
+with exit code 2, REQ-CAL-02). Malformed rows are skipped and counted,
+never silently dropped; zero valid rows is exit code 2. `calibrate` never
+writes to `.tumanomir.yaml` or proposes a single threshold (REQ-CAL-03/04).
+
 Output is human-readable in a TTY; exit code: 0 ok / 1 gate failed / 2 error.
 
 ## Package architecture
@@ -103,11 +117,13 @@ internal/metrics/       K_drift (traceability linter), D_const (lexical scanner)
 internal/dispersion/    AST features, cosine, single-linkage, entropy, D_pair
 internal/instrument/    Generator interface, Ollama backend, PromptV1 + fence extractor
 internal/report/        renders CheckResult/MeasureResult/Report into a TTY report (REQ-OUT-01)
+internal/calibrate/     corpus-based Spearman correlation + median split for `calibrate` (REQ-CAL-01..05)
 ```
 
 `internal/instrument` is the only package allowed to make network calls
 (`internal/nonetwork_test.go` runtime-verifies that `internal/metrics`,
-`internal/spec`, and `internal/config` don't violate this — REQ-CHK-05).
+`internal/spec`, `internal/config`, and `internal/calibrate` don't violate
+this — REQ-CHK-05/REQ-CAL-05).
 
 Report rendering has been extracted into `internal/report`
 (`RenderCheck`/`RenderMeasure`, issue #82): the package depends only on

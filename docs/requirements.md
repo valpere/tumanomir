@@ -315,11 +315,86 @@ for exactly that reason.
     -> [FUN-GATE-03] cmd/tumanomir's gateVerdict(kd, dc internal.Verdict,
        dpair *internal.Verdict) (internal.Verdict, int)
 
+### 2.6 Calibrate command
+
+23. [REQ-CAL-01] `calibrate` must accept a single JSONL corpus file, one
+    row per historical spec: `{"spec_path": "...", "instrument":
+    "ollama:qwen3-coder:30b", "d_pair": 0.27, "outcome": 0.8}`. `spec_path`
+    must point to the immutable spec version that produced the paired
+    `d_pair`/`outcome` — a snapshot, not a live/mutable working file —
+    since `calibrate` recomputes K_drift/D_const fresh from it (DRY: the
+    spec is the single source of truth for its own deterministic metrics)
+    but never recomputes `d_pair` itself (that would mean re-running an
+    LLM instrument, which `calibrate` must never do — see REQ-CAL-05).
+    `outcome` is a caller-defined continuous float (higher = worse
+    downstream pain); this document does not prescribe how
+    rework/compile-failures/iteration-count/token-budget combine into it.
+    -> [FUN-CAL-01] calibrate.Row, calibrate.LoadCorpus(path string)
+       (rows []Row, skipped int, err error), calibrate.AnalyzedRow,
+       calibrate.BuildAnalyzedRows(rows []Row) ([]AnalyzedRow, error)
+
+24. [REQ-CAL-02] `instrument` is a required opaque identifier for the
+    `InstrumentConfig` that produced a row's `d_pair`. All rows in one
+    `calibrate` run must share the same `instrument` value — mixing
+    instruments would produce an authoritative-looking but
+    methodologically meaningless correlation, since D_pair values
+    measured under different instrument configurations aren't
+    comparable, violating the instrument-relative reporting invariant
+    (REQ-MSR-04). A second, distinct `instrument` value anywhere in the
+    corpus is a hard abort naming both the expected and the mismatching
+    value — never a per-row skip like the malformed-row cases in
+    REQ-CAL-04.
+    -> [FUN-CAL-02] calibrate.LoadCorpus's baseline/mismatch check (the
+       first valid row's Instrument becomes the baseline; any later
+       valid row naming a different Instrument returns an error
+       immediately)
+
+25. [REQ-CAL-03] For each of K_drift.Value, D_const.Value, and D_pair,
+    `calibrate` must compute the Spearman rank correlation (not Pearson —
+    `outcome`'s arbitrary, caller-defined scale means only a monotonic
+    relationship is meaningful to test, and Spearman degrades correctly
+    to the binary "clear vs. fog" case via average-rank tie handling)
+    against `outcome`, printing the coefficient even when weak or near
+    zero — a metric that doesn't predict outcome here is itself the
+    finding. `calibrate` must also print a median-split summary: each
+    metric's min/mean/max within the below-median-outcome half and the
+    above-median-outcome half. `calibrate` must never auto-select a
+    single threshold number and must never write to `.tumanomir.yaml` —
+    thresholds stay a human decision (REQ-NFR-03).
+    -> [FUN-CAL-03] calibrate.Analyze(rows []AnalyzedRow)
+       CalibrationResult (Spearman via rank-transform + Pearson on the
+       ranks, per calibrate.go's rank/pearson/spearman helpers; median
+       split via medianSplit); cmd/tumanomir's renderCalibration prints
+       the result with no threshold recommendation and no config write
+
+26. [REQ-CAL-04] A corpus row that fails to parse, has an unreadable
+    `spec_path`, or has `d_pair`/`outcome` outside `[0,1]` is skipped and
+    counted — never silently dropped without a count, and never aborting
+    the whole run (that treatment is reserved for REQ-CAL-02's
+    instrument-mismatch case). `calibrate` must exit with code 2 only
+    when zero valid rows remain after skipping. A corpus with fewer than
+    5 valid rows must still produce full output, with a printed warning
+    that the coefficients are not yet statistically meaningful — a
+    warning, not a failure.
+    -> [FUN-CAL-04] calibrate.LoadCorpus's per-row validation (skip +
+       count); cmd/tumanomir's runCalibrate zero-valid-rows check (exit
+       2); calibrate.MinRowsForCalibration,
+       CalibrationResult.SmallSample
+
+27. [REQ-CAL-05] `calibrate` must never invoke an LLM or make a network
+    call: `d_pair` comes pre-computed from the corpus, K_drift/D_const
+    recompute via the existing zero-network `internal/metrics` functions,
+    and the correlation math is pure arithmetic. This is the same
+    zero-network guarantee `check` already provides (REQ-CHK-05), so
+    `calibrate` is safe to run in the same offline/git-hook contexts.
+    -> [LOG-CAL-05] package internal/calibrate has no network imports
+       (enforced by test, internal/nonetwork_test.go)
+
 ---
 
 ## 3. Non-functional requirements
 
-23. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+28. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -342,7 +417,7 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-24. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+29. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
     (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
@@ -350,7 +425,7 @@ for exactly that reason.
     -> [PHY-NFR-02] go.mod with exactly one external require:
        gopkg.in/yaml.v3
 
-25. [REQ-NFR-03] Methodology invariants must not be silently changed:
+30. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.
@@ -360,7 +435,10 @@ for exactly that reason.
 
 ## 4. Out of scope for v0.1 (roadmap)
 
-- baseline calibration (`calibrate` command); bootstrap CI for D_pair
-  shipped in REQ-MSR-07, so it's no longer listed here
 - graph-based D_const (RFLP/Neo4j), assisted K_drift (LLM parser)
 - non-Ollama instruments, non-Go projections (SQL DDL, OpenAPI)
+
+`calibrate` (REQ-CAL-01..05) and bootstrap CI for D_pair (REQ-MSR-07) both
+shipped, so neither is listed here anymore — see docs/roadmap.md for
+`calibrate`'s remaining open item (accumulating a real outcome-labeled
+corpus, which is data collection, not tool-building).
