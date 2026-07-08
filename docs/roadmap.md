@@ -11,9 +11,10 @@
 
 ## v0.1 — зроблено
 
-`check` (K_drift, D_const), `measure` (D_pair, H_norm) і `gate` (обидва
-шари за один прохід, один exit code для CI, REQ-GATE-01..03) працюють
-end-to-end проти реального Ollama. Деталі — [`architecture.md`](architecture.md).
+`check` (K_drift, D_const), `measure` (D_pair, H_norm, з 95% bootstrap CI
+для D_pair — REQ-MSR-07) і `gate` (обидва шари за один прохід, один exit
+code для CI, REQ-GATE-01..03) працюють end-to-end проти реального Ollama.
+Деталі — [`architecture.md`](architecture.md).
 
 ## Mid-term — обговорено, не заплановано
 
@@ -23,24 +24,20 @@ end-to-end проти реального Ollama. Деталі — [`architecture
    запропонував пороги, специфічні для домену/команди. Потребує накопиченої
    історії реальних вимірів (issue не заведено — чекає на достатній обсяг
    використання `measure` "в бою").
-2. **Bootstrap CI для D_pair.** N=10 генерацій — точкова оцінка з помітним
-   семплінговим шумом (видно навіть у `docs/investigation/_sanity/README.md`
-   при порівнянні приладів A/B). Довірчий інтервал замість одного числа
-   зробив би репорт чеснішим щодо невизначеності.
 
 ## Exploratory — ідея зі статті, не оцінена
 
-3. **RFLP-граф (Neo4j) для повного D_const.** Поточний D_const —
+2. **RFLP-граф (Neo4j) для повного D_const.** Поточний D_const —
    лексичний проксі (маркери/проза). Повний граф
    Requirement-Flow-Linkage-Property дав би структурний вимір густини
    обмежень замість лексичного наближення.
-4. **Assisted-режим K_drift (LLM-парсер).** Поточний K_drift вимагає явної
+3. **Assisted-режим K_drift (LLM-парсер).** Поточний K_drift вимагає явної
    розмітки `[REQ-*] -> [FUN/LOG/PHY-*]`. LLM-асистований парсер міг би
    виводити трасування зі специфікацій без розмітки — ціна: втрата
    детермінізму deterministic-шару (REQ-CHK-01..06 явно вимагають zero-LLM).
-5. **Інші прилади.** OpenAI/Anthropic API поруч з Ollama —
+4. **Інші прилади.** OpenAI/Anthropic API поруч з Ollama —
    `instrument.Generator` вже спроєктований як pluggable interface саме
    для цього.
-6. **Інші проєкції.** SQL DDL, OpenAPI замість тільки Go type definitions
+5. **Інші проєкції.** SQL DDL, OpenAPI замість тільки Go type definitions
    як ціль генерації для `measure` — розширює застосовність за межі
    Go-проєктів.

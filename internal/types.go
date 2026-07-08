@@ -182,6 +182,13 @@ type DispersionResult struct {
 	// DPair is 1 - MeanSim: the working stochastic-layer gate metric,
 	// compared against Thresholds.DPairMax.
 	DPair float64
+	// DPairCILow and DPairCIHigh are the 2.5th/97.5th percentile bounds of
+	// a bootstrap confidence interval around DPair (REQ-MSR-07) — advisory
+	// only, like H/HNorm below; DPairVerdict still compares the point
+	// estimate DPair against DPairMax, never these bounds. Both stay 0
+	// when N<2, same as DPair does, since there is no pair to bootstrap
+	// from.
+	DPairCILow, DPairCIHigh float64
 	// Clusters is the single-linkage cluster count at SimThresh — an
 	// ordinal signal ("one cluster or many"), not a gate.
 	Clusters int

@@ -135,7 +135,9 @@ func writeMeasureWarnings(ew *errWriter, r MeasureResult) {
 // writeMeasureMetrics writes REQ-MSR-04's instrument-config block and the
 // D_pair/H/H_norm lines shared by RenderMeasure and RenderReport (issue
 // #87). H and H_norm are always printed as ordinal/advisory signals — they
-// never gate, per the methodological invariant in CLAUDE.md.
+// never gate, per the methodological invariant in CLAUDE.md. D_pair's line
+// also carries its 95% bootstrap CI (REQ-MSR-07) — advisory alongside the
+// point estimate, which is still what DPairVerdict gates on.
 func writeMeasureMetrics(ew *errWriter, r MeasureResult, th internal.Thresholds) {
 	cfg := r.Config
 
@@ -158,8 +160,8 @@ func writeMeasureMetrics(ew *errWriter, r MeasureResult, th internal.Thresholds)
 		return
 	}
 
-	ew.printf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)\n",
-		r.Dispersion.DPair, r.DPairVerdict, pad(r.DPairVerdict), th.DPairMax, r.Dispersion.MeanSim, r.Dispersion.N, r.Dispersion.Discarded)
+	ew.printf("  D_pair:   %.2f  [%s]%s(95%% CI [%.2f, %.2f]; threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)\n",
+		r.Dispersion.DPair, r.DPairVerdict, pad(r.DPairVerdict), r.Dispersion.DPairCILow, r.Dispersion.DPairCIHigh, th.DPairMax, r.Dispersion.MeanSim, r.Dispersion.N, r.Dispersion.Discarded)
 	ew.printf("  H:        %.2f  bits (ordinal signal only, not gated)\n", r.Dispersion.H)
 	ew.printf("  H_norm:   %.2f  (ordinal signal only, not gated)\n", r.Dispersion.HNorm)
 }
