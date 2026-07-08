@@ -23,9 +23,11 @@ type corpusRow struct {
 }
 
 // LoadCorpus reads a JSONL corpus file, one Row per line. A line that
-// fails to parse as JSON, whose spec_path can't be opened, or whose
-// d_pair/outcome falls outside [0,1] is skipped and counted in skipped —
-// never aborting the whole run (REQ-CAL-04).
+// fails to parse as JSON, has an empty/missing instrument (REQ-CAL-02
+// calls it required — an empty string is not a meaningful identifier and
+// must not silently become the corpus baseline), whose spec_path can't be
+// opened, or whose d_pair/outcome falls outside [0,1] is skipped and
+// counted in skipped — never aborting the whole run (REQ-CAL-04).
 //
 // The first valid row's Instrument becomes the corpus baseline; any later
 // valid row naming a different Instrument aborts the load immediately
@@ -62,7 +64,7 @@ func LoadCorpus(path string) (rows []Row, skipped int, err error) {
 			skipped++
 			continue
 		}
-		if raw.DPair < 0 || raw.DPair > 1 || raw.Outcome < 0 || raw.Outcome > 1 {
+		if raw.Instrument == "" || raw.DPair < 0 || raw.DPair > 1 || raw.Outcome < 0 || raw.Outcome > 1 {
 			skipped++
 			continue
 		}

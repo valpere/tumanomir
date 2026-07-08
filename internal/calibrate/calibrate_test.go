@@ -203,6 +203,33 @@ func TestLoadCorpusInstrumentMismatchAborts(t *testing.T) {
 	}
 }
 
+// TestLoadCorpusEmptyInstrumentSkipped guards REQ-CAL-02's "required"
+// contract: an omitted/empty instrument field must not silently become the
+// corpus baseline (an empty string is not a meaningful instrument
+// identifier) — it's skipped and counted like any other malformed row,
+// same as a missing d_pair/outcome would be.
+func TestLoadCorpusEmptyInstrumentSkipped(t *testing.T) {
+	dir := t.TempDir()
+	goodSpec := writeSpec(t, dir, "good.md")
+	lines := []string{
+		fmt.Sprintf(`{"spec_path":%q,"instrument":"","d_pair":0.2,"outcome":0.3}`, goodSpec),
+		fmt.Sprintf(`{"spec_path":%q,"d_pair":0.4,"outcome":0.5}`, goodSpec), // instrument field entirely absent
+		fmt.Sprintf(`{"spec_path":%q,"instrument":"ollama:m","d_pair":0.6,"outcome":0.7}`, goodSpec),
+	}
+	corpusPath := writeCorpus(t, dir, lines)
+
+	rows, skipped, err := LoadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if skipped != 2 {
+		t.Fatalf("skipped = %d, want 2 (empty instrument, missing instrument)", skipped)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1 valid row still processed", len(rows))
+	}
+}
+
 // writeCorpus writes lines (one JSONL row per line, already-serialized)
 // to a corpus.jsonl file under dir and returns its path.
 func writeCorpus(t *testing.T, dir string, lines []string) string {
