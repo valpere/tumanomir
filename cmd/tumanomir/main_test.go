@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1683,5 +1684,128 @@ func TestGateJSONRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(orig, got) {
 		t.Fatalf("round-trip mismatch:\norig = %+v\ngot  = %+v", orig, got)
+	}
+}
+
+// --- runCalibrate (⚖️ Balanced: happy path + error cases; the correlation
+// math itself is covered at 🏗️ Production rigor in internal/calibrate) ---
+
+// writeCalibrateSpec writes a trivial spec fixture and returns its path,
+// mirroring the small helper fixtures used elsewhere in this file
+// (TestRunCheck*, etc.).
+func writeCalibrateSpec(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("[REQ-X-01] traced\n-> [FUN-X-01] Do()\n[REQ-X-02] not traced\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	return path
+}
+
+func TestRunCalibrateHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	specA := writeCalibrateSpec(t, dir, "a.md")
+	specB := writeCalibrateSpec(t, dir, "b.md")
+	corpus := filepath.Join(dir, "corpus.jsonl")
+	content := fmt.Sprintf(
+		"{\"spec_path\":%q,\"instrument\":\"ollama:m\",\"d_pair\":0.4,\"outcome\":0.8}\n"+
+			"{\"spec_path\":%q,\"instrument\":\"ollama:m\",\"d_pair\":0.1,\"outcome\":0.2}\n",
+		specA, specB)
+	if err := os.WriteFile(corpus, []byte(content), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int { return runCalibrate([]string{corpus}) })
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "Calibration over 2 valid row(s), 0 skipped") {
+		t.Fatalf("want a row-count summary line, got output:\n%s", out)
+	}
+	for _, name := range []string{"K_drift", "D_const", "D_pair"} {
+		if !strings.Contains(out, name) {
+			t.Fatalf("want a %s correlation line, got output:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "fewer than") {
+		t.Fatalf("want the small-sample warning for a 2-row corpus, got output:\n%s", out)
+	}
+}
+
+func TestRunCalibrateArgCountValidation(t *testing.T) {
+	errOut, code := captureStderr(t, func() int { return runCalibrate(nil) })
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+func TestRunCalibrateMissingCorpusFile(t *testing.T) {
+	errOut, code := captureStderr(t, func() int {
+		return runCalibrate([]string{filepath.Join(t.TempDir(), "does-not-exist.jsonl")})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+func TestRunCalibrateZeroValidRows(t *testing.T) {
+	dir := t.TempDir()
+	corpus := filepath.Join(dir, "corpus.jsonl")
+	if err := os.WriteFile(corpus, []byte("not valid json\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int { return runCalibrate([]string{corpus}) })
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "zero valid rows") {
+		t.Fatalf("want an actionable zero-valid-rows message, got: %s", errOut)
+	}
+}
+
+func TestRunCalibrateInstrumentMismatchExits2(t *testing.T) {
+	dir := t.TempDir()
+	specA := writeCalibrateSpec(t, dir, "a.md")
+	specB := writeCalibrateSpec(t, dir, "b.md")
+	corpus := filepath.Join(dir, "corpus.jsonl")
+	content := fmt.Sprintf(
+		"{\"spec_path\":%q,\"instrument\":\"ollama:m1\",\"d_pair\":0.4,\"outcome\":0.8}\n"+
+			"{\"spec_path\":%q,\"instrument\":\"ollama:m2\",\"d_pair\":0.1,\"outcome\":0.2}\n",
+		specA, specB)
+	if err := os.WriteFile(corpus, []byte(content), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int { return runCalibrate([]string{corpus}) })
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "ollama:m1") || !strings.Contains(errOut, "ollama:m2") {
+		t.Fatalf("want the error to name both mismatching instruments, got: %s", errOut)
+	}
+}
+
+func TestDispatchCalibrate(t *testing.T) {
+	dir := t.TempDir()
+	specA := writeCalibrateSpec(t, dir, "a.md")
+	corpus := filepath.Join(dir, "corpus.jsonl")
+	content := fmt.Sprintf("{\"spec_path\":%q,\"instrument\":\"ollama:m\",\"d_pair\":0.4,\"outcome\":0.8}\n", specA)
+	if err := os.WriteFile(corpus, []byte(content), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int { return dispatch([]string{"calibrate", corpus}) })
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "Calibration over 1 valid row(s), 0 skipped") {
+		t.Fatalf("want a row-count summary line, got output:\n%s", out)
 	}
 }

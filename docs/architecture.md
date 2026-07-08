@@ -56,6 +56,11 @@ tumanomir measure [flags] <file.md>     # стохастичний шар: D_pai
 tumanomir gate [flags] <file.md>        # CI-режим: check + measure (якщо
                                          # прилад визначено) за один прохід,
                                          # один exit code
+tumanomir calibrate <corpus.jsonl>      # кореляція K_drift/D_const/D_pair
+                                         # з розміченим історичним корпусом
+                                         # (Spearman + median split);
+                                         # інформує, не задає поріг сама —
+                                         # без LLM
 tumanomir version                       # надрукувати версію і вийти
 
 # check, measure і gate
@@ -90,6 +95,16 @@ tumanomir version                       # надрукувати версію і
 вважається такою ж проблемою цілісності виміру, як і в REQ-MSR-06
 (REQ-GATE-02).
 
+`calibrate` не має прапорців, пов'язаних з приладом: `d_pair` читається з
+корпусу, ніколи не переміряється. Формат корпусу — JSONL, один рядок на
+історичну специфікацію — `spec_path` має вказувати на незмінний знімок
+специфікації, що дав пару `d_pair`/`outcome`; усі рядки мають розділяти
+одне значення `instrument` (друге, відмінне значення будь-де в корпусі
+падає з exit code 2, REQ-CAL-02). Некоректні рядки пропускаються і
+рахуються, ніколи не відкидаються тихо; нуль валідних рядків — exit code
+2. `calibrate` ніколи не пише в `.tumanomir.yaml` і не пропонує єдиний
+поріг (REQ-CAL-03/04).
+
 Вивід — людський у TTY; exit code: 0 ok / 1 gate failed / 2 error.
 
 ## Архітектура пакетів
@@ -104,11 +119,13 @@ internal/metrics/       K_drift (лінтер трасування), D_const (л
 internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair
 internal/instrument/    інтерфейс Generator, Ollama-бекенд, PromptV1 + фрейм-екстрактор
 internal/report/        рендеринг CheckResult/MeasureResult/Report у TTY-звіт (REQ-OUT-01)
+internal/calibrate/     Spearman-кореляція + median split по історичному корпусу для `calibrate` (REQ-CAL-01..05)
 ```
 
 `internal/instrument` — єдиний пакет, якому дозволено мережу
 (`internal/nonetwork_test.go` рантайм-перевіряє, що `internal/metrics`,
-`internal/spec` і `internal/config` цього не порушують — REQ-CHK-05).
+`internal/spec`, `internal/config` і `internal/calibrate` цього не
+порушують — REQ-CHK-05/REQ-CAL-05).
 
 Рендеринг звітів винесено в `internal/report` (`RenderCheck`/`RenderMeasure`,
 issue #82): пакет залежить лише від `internal`, ніколи від

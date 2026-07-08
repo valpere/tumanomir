@@ -19,12 +19,16 @@ instance. Details: [`architecture.md`](architecture.md).
 
 ## Mid-term — discussed, not scheduled
 
-1. **`tumanomir calibrate`.** The 0.20/0.35/0.30 thresholds are hypotheses
-   from the article, not calibrated on any real team's data. `calibrate`
-   would run `measure` over a labeled corpus (known-sharp vs. known-foggy
-   specs) and propose domain/team-specific thresholds. Needs an
-   accumulated history of real measurements first (no issue filed yet —
-   waiting on enough real-world `measure` usage).
+1. **Data for `tumanomir calibrate`.** The tool itself is now built
+   (`calibrate <corpus.jsonl>`, issue #94, REQ-CAL-01..05): it reads a
+   JSONL corpus of historical specs, each paired with a pre-measured
+   D_pair and a caller-defined outcome score, computes each of
+   K_drift/D_const/D_pair's Spearman rank correlation against outcome,
+   and prints a median-split summary — informing, never auto-setting, a
+   threshold. What's still open isn't the tool, it's the data: no real
+   outcome-labeled corpus exists yet (ragivka/session-indexer haven't
+   started accumulating rows). This item stays on the roadmap until such
+   a corpus exists.
 
 ## Exploratory — an idea from the article, not yet scoped
 
