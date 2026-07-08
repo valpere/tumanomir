@@ -36,13 +36,13 @@ for exactly that reason.
   num_ctx: Int @constraint(rule: "must exceed prompt token count"),
   num_predict: Int @constraint(rule: "must exceed natural output length"),
   sim_threshold: Float @constraint(default: 0.95, range: [0,1], rule: "the measure command's --sim-threshold flag defaults to 0.95 (a proposed hypothesis matching the article's experiment, not a calibrated constant); dispersion.Analyze itself takes SimThreshold as a required caller-supplied parameter with no internal default"),
-  prompt: String @constraint(rule: "named, versioned package-level constant, not an inline literal — instrument-relative config, must be reproducible from the report")
+  prompt: String @constraint(rule: "named, versioned package-level constant, not an inline literal — instrument-relative config, must be reproducible from the report"),
+  prompt_version: String @constraint(rule: "identifies which named prompt constant prompt's value came from, e.g. \"PromptV1\" — lets the report print the version without a hardcoded literal at the print site")
 }
 
 @schema Report {
-  k_drift: KDriftResult?,
-  d_const: DConstResult?,
-  dispersion: DispersionResult?,
+  check: CheckResult,
+  measure: MeasureResult?,
   verdict: Enum["ok","warn","block","skipped"],
   exit_code: Int @constraint(in: [0,1,2])
 }
@@ -205,7 +205,29 @@ for exactly that reason.
     failed, 2 = execution error. CI-composable by construction.
     -> [FUN-OUT-02] Report.exit_code
 
-16. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
+16. [REQ-OUT-03] `check`, `measure`, and `gate` must accept a `--format
+    text|json` flag (default `text`, current TTY behavior unchanged). In
+    JSON mode, the command emits exactly one compact JSON object to
+    stdout (`json.NewEncoder(os.Stdout).Encode`), nothing else — no
+    additional text before or after it. Field names and nesting are
+    code-authoritative via the Go structs' `json` tags (CheckResult,
+    MeasureResult, Report, and the value types they embed) rather than
+    re-derived here in markup — the same treatment REQ-MSR-01 already
+    gives `internal/dispersion/astfeat.go`, so this requirement points to
+    the code rather than duplicating its shape, and the two must not
+    drift. `check`/`measure`'s JSON carries no in-band exit_code field —
+    the process exit status (REQ-OUT-02) is the only signal for those two
+    commands; `gate`'s JSON does carry one, via Report.exit_code
+    (REQ-GATE-03). Any `--format` value other than `text`/`json` is a
+    usage error (stderr, exit 2). Error paths (validation/execution
+    failures) are unaffected — always plain text on stderr regardless of
+    `--format`.
+    -> [FUN-OUT-03] cmd/tumanomir's checkJSON/measureJSON/gateJSON
+       wrapper types (pairing each command's result with the
+       internal.Thresholds it was gated against) and the --format
+       branches in runCheck/runMeasureImpl/runGateImpl
+
+17. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
     the article's hypothesis values (0.20 / 0.35 / 0.30) and must be
     documented as uncalibrated starting points.
     -> [FUN-CFG-01] internal.DefaultThresholds(); flag wiring in cmd
@@ -228,7 +250,7 @@ for exactly that reason.
 
 ### 2.4 Configuration file (.tumanomir.yaml)
 
-17. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
+18. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
     optional `.tumanomir.yaml` config file so thresholds and instrument
     settings don't have to be repeated as CLI flags on every invocation.
     An explicit `--config <path>` is authoritative: the named file must
@@ -241,7 +263,7 @@ for exactly that reason.
     -> [FUN-CFG-02] internal/config.Config, internal/config.Load(path string)
        (internal/config.Config, error)
 
-18. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
+19. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
     Each subcommand's config file is resolved before its `flag.FlagSet` is
     built, and the resolved value seeds each flag's own default — so
     `flag.Parse`'s ordinary override behavior gives CLI-flag-wins for
@@ -254,7 +276,7 @@ for exactly that reason.
 
 ### 2.5 Gate command (CI mode)
 
-19. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
+20. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
     D_const) and, when an instrument is configured, the stochastic
     layer (D_pair, H_norm) in one process invocation over one spec
     file, producing one unified Report (@schema Report) and one exit
@@ -269,8 +291,8 @@ for exactly that reason.
     runMeasureImpl's directory check), extended to `gate` uniformly
     regardless of which mode it runs in.
 
-20. [REQ-GATE-02] `gate` must run in deterministic-only mode —
-    Report.dispersion left null — when no instrument is resolvable from
+21. [REQ-GATE-02] `gate` must run in deterministic-only mode —
+    Report.measure left null — when no instrument is resolvable from
     CLI flags or `.tumanomir.yaml`'s `instrument:` section. If any
     measure-specific CLI flag (`--samples`/`-n`, `--temp`,
     `--sim-threshold`, `--num-ctx`, `--num-predict`, `--think`,
@@ -282,7 +304,7 @@ for exactly that reason.
     -> [FUN-GATE-02] cmd/tumanomir's runGate instrument-resolution and
        contradiction-check logic (fs.Visit over measure-specific flags)
 
-21. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
+22. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
     KDVerdict, DCVerdict, and (when the stochastic layer ran)
     DPairVerdict by worst-case precedence block > warn > skipped > ok
     over that full set. exit_code is 1 if and only if KDVerdict ==
@@ -297,7 +319,7 @@ for exactly that reason.
 
 ## 3. Non-functional requirements
 
-22. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+23. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -320,7 +342,7 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-23. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+24. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
     (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
@@ -328,7 +350,7 @@ for exactly that reason.
     -> [PHY-NFR-02] go.mod with exactly one external require:
        gopkg.in/yaml.v3
 
-24. [REQ-NFR-03] Methodology invariants must not be silently changed:
+25. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.

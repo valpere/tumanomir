@@ -63,6 +63,9 @@ tumanomir version                       # print version and exit
 --config  string  path to a .tumanomir.yaml config file (default: load
                    ./.tumanomir.yaml if present, cwd only, no upward
                    search; a named --config path must exist and parse)
+--format  string  output format: "text" (default) or "json" — one
+                   compact JSON object to stdout, fields/shape defined by
+                   the Go structs' json tags (REQ-OUT-03)
 
 # check (and gate)
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)

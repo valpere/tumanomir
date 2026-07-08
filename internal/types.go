@@ -38,13 +38,13 @@ const (
 type Thresholds struct {
 	// KDriftMax is the maximum acceptable fraction of requirements without
 	// a trace edge (K_drift gate, deterministic layer).
-	KDriftMax float64
+	KDriftMax float64 `json:"k_drift_max"`
 	// DConstMin is the minimum acceptable lexical constraint density
 	// (D_const, advisory-only — never gates the exit code).
-	DConstMin float64
+	DConstMin float64 `json:"d_const_min"`
 	// DPairMax is the maximum acceptable 1-minus-mean-pairwise-AST-similarity
 	// (D_pair gate, stochastic layer).
-	DPairMax float64
+	DPairMax float64 `json:"d_pair_max"`
 }
 
 // DefaultThresholds returns the source article's starting-point hypothesis
@@ -76,19 +76,19 @@ const PromptEstimateDivergenceFactor = 1.5
 // cmd/tumanomir's `check` subcommand and the Makefile's `dogfood` target).
 type KDriftResult struct {
 	// Requirements is the total count of well-formed [REQ-*] tags found.
-	Requirements int
+	Requirements int `json:"requirements"`
 	// Hanging is how many of those requirements have no
 	// "-> [FUN-*|LOG-*|PHY-*]" edge anywhere before the next [REQ-*] tag.
-	Hanging int
+	Hanging int `json:"hanging"`
 	// HangingIDs holds the identifiers of every hanging requirement, so a
 	// failing report can point at exactly which requirements need tracing
 	// rather than just a bare count.
-	HangingIDs []string
+	HangingIDs []string `json:"hanging_ids"`
 	// Value is Hanging/Requirements — the fraction compared against
 	// Thresholds.KDriftMax. Left at its zero value (0) when Requirements
 	// is 0, since a 0/0 ratio has no meaningful "drift" to report (see
 	// VerdictSkipped, which is what a zero-requirement spec renders as).
-	Value float64
+	Value float64 `json:"value"`
 }
 
 // DConstResult is the lexical constraint-density proxy for D_const: a
@@ -99,14 +99,14 @@ type KDriftResult struct {
 type DConstResult struct {
 	// ConstraintMarkers counts recognized constraint-bearing tokens
 	// (@schema/@constraint annotations, etc.) in the scanned spec.
-	ConstraintMarkers int
+	ConstraintMarkers int `json:"constraint_markers"`
 	// ProseTokens counts ordinary word tokens outside constraint markers —
 	// the denominator's other half.
-	ProseTokens int
+	ProseTokens int `json:"prose_tokens"`
 	// Value is ConstraintMarkers / (ConstraintMarkers + ProseTokens),
 	// compared against Thresholds.DConstMin. Left at its zero value when
 	// both counts are 0 (an empty document has no density to report).
-	Value float64
+	Value float64 `json:"value"`
 }
 
 // InstrumentConfig is the full stochastic-layer instrument configuration.
@@ -118,48 +118,48 @@ type DConstResult struct {
 type InstrumentConfig struct {
 	// Backend selects the Generator implementation; v0.1 supports only
 	// "ollama" (see internal/instrument.NewOllama).
-	Backend string
+	Backend string `json:"backend"`
 	// Model is the backend-specific model identifier, e.g. "qwen3-coder:30b".
-	Model string
+	Model string `json:"model"`
 	// Temperature is the sampling temperature passed to the backend —
 	// higher values increase generation-to-generation variance, which is
 	// exactly what D_pair is trying to measure, so this is not a knob to
 	// "tune for better output," it's part of the instrument's identity.
-	Temperature float64
+	Temperature float64 `json:"temperature"`
 	// Samples is how many generations to request per spec (N in D_pair's
 	// "1 - mean pairwise AST similarity of N generations").
-	Samples int
+	Samples int `json:"samples"`
 	// Think enables reasoning-model "thinking" mode. Per REQ-MSR-06 this
 	// must be false for reasoning models in practice — true here would let
 	// think-tokens leak into the measured output and corrupt the AST
 	// feature extraction downstream.
-	Think bool
+	Think bool `json:"think"`
 	// NumCtx is the context window size in tokens; must exceed the actual
 	// prompt token count or the backend will silently truncate the prompt —
 	// a measurement-integrity bug, not a performance knob (REQ-MSR-06).
-	NumCtx int
+	NumCtx int `json:"num_ctx"`
 	// NumPredict is the max generated tokens; must exceed the natural
 	// output length or generations get cut off mid-artifact, which would
 	// masquerade as a parse failure rather than what it actually is (an
 	// instrument misconfiguration).
-	NumPredict int
+	NumPredict int `json:"num_predict"`
 	// SimThreshold is the single-linkage clustering distance threshold used
 	// to compute H (cluster entropy) from the pairwise similarity matrix —
 	// it only affects H/HNorm, never MeanSim/DPair (see
 	// internal/dispersion.Analyze).
-	SimThreshold float64
+	SimThreshold float64 `json:"sim_threshold"`
 	// Prompt is the exact instrument.PromptV1 (or later version) text sent,
 	// verbatim. It holds the constant's *value* (a plain string), not a
 	// reference to it: internal/types.go (package internal) must not import
 	// internal/instrument (which already imports internal), so runMeasure
 	// is expected to populate this field with instrument.PromptV1.
-	Prompt string
+	Prompt string `json:"prompt"`
 	// PromptVersion identifies which named prompt constant Prompt's value
 	// came from (e.g. instrument.PromptVersion == "PromptV1"), so the
 	// report can print the version without a hardcoded literal at the
 	// print site — printing a literal would silently lie once a future
 	// PromptV2 lands and this field isn't updated alongside it.
-	PromptVersion string
+	PromptVersion string `json:"prompt_version"`
 }
 
 // DispersionResult is the stochastic-layer output (D_pair, H/HNorm) for one
@@ -169,40 +169,41 @@ type DispersionResult struct {
 	// N is the count of valid (successfully parsed) samples actually used
 	// in the computation — may be less than InstrumentConfig.Samples if
 	// some generations were discarded after exhausting retries.
-	N int
+	N int `json:"n"`
 	// Discarded is how many generation slots never produced a valid sample
 	// even after retrying (REQ-MSR-05's invalid-rate signal) — reported,
 	// never hidden, since a high discard rate itself indicates instrument
 	// or prompt trouble that would otherwise masquerade as "clean" D_pair.
-	Discarded int
+	Discarded int `json:"discarded"`
 	// MeanSim is the mean pairwise cosine similarity across all N valid
 	// samples' AST feature vectors. Threshold-independent — computed
 	// before any clustering happens.
-	MeanSim float64
+	MeanSim float64 `json:"mean_sim"`
 	// DPair is 1 - MeanSim: the working stochastic-layer gate metric,
 	// compared against Thresholds.DPairMax.
-	DPair float64
+	DPair float64 `json:"d_pair"`
 	// DPairCILow and DPairCIHigh are the 2.5th/97.5th percentile bounds of
 	// a bootstrap confidence interval around DPair (REQ-MSR-07) — advisory
 	// only, like H/HNorm below; DPairVerdict still compares the point
 	// estimate DPair against DPairMax, never these bounds. Both stay 0
 	// when N<2, same as DPair does, since there is no pair to bootstrap
 	// from.
-	DPairCILow, DPairCIHigh float64
+	DPairCILow  float64 `json:"d_pair_ci_low"`
+	DPairCIHigh float64 `json:"d_pair_ci_high"`
 	// Clusters is the single-linkage cluster count at SimThresh — an
 	// ordinal signal ("one cluster or many"), not a gate.
-	Clusters int
+	Clusters int `json:"clusters"`
 	// SimThresh is the clustering distance threshold this result's
 	// Clusters/H/HNorm were computed at, carried alongside the result so a
 	// report can print which threshold produced them.
-	SimThresh float64
+	SimThresh float64 `json:"sim_thresh"`
 	// H is the Shannon entropy over cluster sizes, in bits. Saturates at
 	// log2(N) for small N, so it is not directly comparable across
 	// different N by itself — see HNorm for the comparable form.
-	H float64
+	H float64 `json:"h"`
 	// HNorm is H / log2(N), normalized into [0,1] — an ordinal signal only
 	// ("one cluster or many"), reported but never gated (D_pair is the
 	// only stochastic-layer gate; see CLAUDE.md's methodological
 	// invariants).
-	HNorm float64
+	HNorm float64 `json:"h_norm"`
 }
