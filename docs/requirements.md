@@ -165,9 +165,30 @@ for exactly that reason.
        against num_ctx before the run; Generation.DoneReason surfaced from
        the backend response and flagged in measure's report
 
+13. [REQ-MSR-07] D_pair's point estimate must be reported alongside a 95%
+    bootstrap confidence interval, so the report is honest about the
+    sampling noise visible across independent instruments at the same N.
+    The bootstrap is defined operationally: resample the N AST feature
+    vectors with replacement B=2000 times; for each resample, compute
+    mean pairwise cosine similarity over the resampled multiset (not the
+    precomputed similarity matrix — a resample can draw the same original
+    sample twice, and the matrix's diagonal is never populated) and take
+    1 − that mean; the CI bounds are the 2.5th and 97.5th percentiles of
+    the resulting 2000 D_pair values. This is purely additive: it does not
+    change D_pair's definition, and DPairVerdict still gates on the point
+    estimate alone — the CI is advisory, like H/H_norm (REQ-MSR-02).
+    -> [FUN-MSR-07] dispersion.Analyze populates DispersionResult{DPairCILow, DPairCIHigh}
+
+    B, the fixed RNG seed, and the 95% CI level are compile-time
+    constants, not configurable via flag or config file. If any of them
+    ever becomes configurable, it must enter InstrumentConfig and the
+    printed report, or it would silently break the instrument-relative
+    reproducibility invariant (REQ-MSR-04) — a report could no longer be
+    reproduced from its own printed configuration alone.
+
 ### 2.3 Output and gating
 
-13. [REQ-OUT-01] Human-readable TTY output: one line per gated metric
+14. [REQ-OUT-01] Human-readable TTY output: one line per gated metric
     with value, verdict (ok/warn/block/skipped) and the threshold it was
     judged against. Ordinal signals (H, H_norm) are printed without a
     verdict/threshold column, since they never gate (REQ-MSR-02).
@@ -180,11 +201,11 @@ for exactly that reason.
        rendering their own structurally different content standalone —
        RenderReport is additive, not a replacement.
 
-14. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
+15. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
     failed, 2 = execution error. CI-composable by construction.
     -> [FUN-OUT-02] Report.exit_code
 
-15. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
+16. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
     the article's hypothesis values (0.20 / 0.35 / 0.30) and must be
     documented as uncalibrated starting points.
     -> [FUN-CFG-01] internal.DefaultThresholds(); flag wiring in cmd
@@ -207,7 +228,7 @@ for exactly that reason.
 
 ### 2.4 Configuration file (.tumanomir.yaml)
 
-16. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
+17. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
     optional `.tumanomir.yaml` config file so thresholds and instrument
     settings don't have to be repeated as CLI flags on every invocation.
     An explicit `--config <path>` is authoritative: the named file must
@@ -220,7 +241,7 @@ for exactly that reason.
     -> [FUN-CFG-02] internal/config.Config, internal/config.Load(path string)
        (internal/config.Config, error)
 
-17. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
+18. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
     Each subcommand's config file is resolved before its `flag.FlagSet` is
     built, and the resolved value seeds each flag's own default — so
     `flag.Parse`'s ordinary override behavior gives CLI-flag-wins for
@@ -233,7 +254,7 @@ for exactly that reason.
 
 ### 2.5 Gate command (CI mode)
 
-18. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
+19. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
     D_const) and, when an instrument is configured, the stochastic
     layer (D_pair, H_norm) in one process invocation over one spec
     file, producing one unified Report (@schema Report) and one exit
@@ -248,7 +269,7 @@ for exactly that reason.
     runMeasureImpl's directory check), extended to `gate` uniformly
     regardless of which mode it runs in.
 
-19. [REQ-GATE-02] `gate` must run in deterministic-only mode —
+20. [REQ-GATE-02] `gate` must run in deterministic-only mode —
     Report.dispersion left null — when no instrument is resolvable from
     CLI flags or `.tumanomir.yaml`'s `instrument:` section. If any
     measure-specific CLI flag (`--samples`/`-n`, `--temp`,
@@ -261,7 +282,7 @@ for exactly that reason.
     -> [FUN-GATE-02] cmd/tumanomir's runGate instrument-resolution and
        contradiction-check logic (fs.Visit over measure-specific flags)
 
-20. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
+21. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
     KDVerdict, DCVerdict, and (when the stochastic layer ran)
     DPairVerdict by worst-case precedence block > warn > skipped > ok
     over that full set. exit_code is 1 if and only if KDVerdict ==
@@ -276,7 +297,7 @@ for exactly that reason.
 
 ## 3. Non-functional requirements
 
-21. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+22. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -299,7 +320,7 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-22. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+23. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
     (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
@@ -307,7 +328,7 @@ for exactly that reason.
     -> [PHY-NFR-02] go.mod with exactly one external require:
        gopkg.in/yaml.v3
 
-23. [REQ-NFR-03] Methodology invariants must not be silently changed:
+24. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.
@@ -317,6 +338,7 @@ for exactly that reason.
 
 ## 4. Out of scope for v0.1 (roadmap)
 
-- baseline calibration (`calibrate` command), bootstrap CIs
+- baseline calibration (`calibrate` command); bootstrap CI for D_pair
+  shipped in REQ-MSR-07, so it's no longer listed here
 - graph-based D_const (RFLP/Neo4j), assisted K_drift (LLM parser)
 - non-Ollama instruments, non-Go projections (SQL DDL, OpenAPI)

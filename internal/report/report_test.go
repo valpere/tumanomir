@@ -88,14 +88,16 @@ func TestRenderCheckExactOutput(t *testing.T) {
 func TestRenderMeasureExactOutput(t *testing.T) {
 	mr := MeasureResult{
 		Dispersion: internal.DispersionResult{
-			N:         5,
-			Discarded: 3,
-			MeanSim:   0.82,
-			DPair:     0.18,
-			Clusters:  2,
-			SimThresh: 0.95,
-			H:         1.37,
-			HNorm:     0.59,
+			N:           5,
+			Discarded:   3,
+			MeanSim:     0.82,
+			DPair:       0.18,
+			DPairCILow:  0.09,
+			DPairCIHigh: 0.27,
+			Clusters:    2,
+			SimThresh:   0.95,
+			H:           1.37,
+			HNorm:       0.59,
 		},
 		Config: internal.InstrumentConfig{
 			Backend:       "ollama",
@@ -130,7 +132,7 @@ func TestRenderMeasureExactOutput(t *testing.T) {
 		"  num_predict:    2048\n" +
 		"  sim_threshold:  0.95\n" +
 		"  prompt:         PromptV1 (5 bytes)\n\n" +
-		"  D_pair:   0.18  [ok]     (threshold 0.30, mean sim 0.82, N=5 valid, 3 discarded)\n" +
+		"  D_pair:   0.18  [ok]     (95% CI [0.09, 0.27]; threshold 0.30, mean sim 0.82, N=5 valid, 3 discarded)\n" +
 		"  H:        1.37  bits (ordinal signal only, not gated)\n" +
 		"  H_norm:   0.59  (ordinal signal only, not gated)\n"
 	if out != want {
@@ -228,14 +230,16 @@ func TestRenderMeasurePromptUnderestimateWarningVisibility(t *testing.T) {
 func TestRenderMeasureOKVerdict(t *testing.T) {
 	mr := MeasureResult{
 		Dispersion: internal.DispersionResult{
-			N:         5,
-			Discarded: 1,
-			MeanSim:   0.82,
-			DPair:     0.18,
-			Clusters:  2,
-			SimThresh: 0.95,
-			H:         1.37,
-			HNorm:     0.59,
+			N:           5,
+			Discarded:   1,
+			MeanSim:     0.82,
+			DPair:       0.18,
+			DPairCILow:  0.09,
+			DPairCIHigh: 0.27,
+			Clusters:    2,
+			SimThresh:   0.95,
+			H:           1.37,
+			HNorm:       0.59,
 		},
 		Config: internal.InstrumentConfig{
 			Backend:       "ollama",
@@ -278,8 +282,8 @@ func TestRenderMeasureOKVerdict(t *testing.T) {
 		}
 	}
 
-	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
-		mr.Dispersion.DPair, internal.VerdictOK, pad(internal.VerdictOK), testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
+	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(95%% CI [%.2f, %.2f]; threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
+		mr.Dispersion.DPair, internal.VerdictOK, pad(internal.VerdictOK), mr.Dispersion.DPairCILow, mr.Dispersion.DPairCIHigh, testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
 	if !strings.Contains(out, wantDPair) {
 		t.Fatalf("want D_pair line %q, got output:\n%s", wantDPair, out)
 	}
@@ -332,14 +336,16 @@ func TestRenderMeasurePromptVersionIsNotHardcoded(t *testing.T) {
 func TestRenderMeasureBlockVerdict(t *testing.T) {
 	mr := MeasureResult{
 		Dispersion: internal.DispersionResult{
-			N:         4,
-			Discarded: 0,
-			MeanSim:   0.55,
-			DPair:     0.45,
-			Clusters:  4,
-			SimThresh: 0.95,
-			H:         2.0,
-			HNorm:     1.0,
+			N:           4,
+			Discarded:   0,
+			MeanSim:     0.55,
+			DPair:       0.45,
+			DPairCILow:  0.30,
+			DPairCIHigh: 0.60,
+			Clusters:    4,
+			SimThresh:   0.95,
+			H:           2.0,
+			HNorm:       1.0,
 		},
 		Config: internal.InstrumentConfig{
 			Backend:       "ollama",
@@ -360,8 +366,8 @@ func TestRenderMeasureBlockVerdict(t *testing.T) {
 
 	out := mustRenderMeasure(t, mr)
 
-	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
-		mr.Dispersion.DPair, internal.VerdictBlock, pad(internal.VerdictBlock), testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
+	wantDPair := fmt.Sprintf("  D_pair:   %.2f  [%s]%s(95%% CI [%.2f, %.2f]; threshold %.2f, mean sim %.2f, N=%d valid, %d discarded)",
+		mr.Dispersion.DPair, internal.VerdictBlock, pad(internal.VerdictBlock), mr.Dispersion.DPairCILow, mr.Dispersion.DPairCIHigh, testThresholds.DPairMax, mr.Dispersion.MeanSim, mr.Dispersion.N, mr.Dispersion.Discarded)
 	if !strings.Contains(out, wantDPair) {
 		t.Fatalf("want D_pair line %q, got output:\n%s", wantDPair, out)
 	}

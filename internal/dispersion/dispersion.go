@@ -16,9 +16,11 @@ import (
 // dropping any that don't parse; (2) if fewer than 2 valid sources remain,
 // there is no pair to compare — return early with just N populated;
 // (3) compute the full pairwise cosine-similarity matrix; (4) MeanSim/DPair
-// come directly off that matrix, independent of simThreshold; (5) H/HNorm
-// additionally cluster the matrix at simThreshold and take entropy over
-// cluster sizes — this is the only place simThreshold affects the result.
+// come directly off that matrix, independent of simThreshold; (5) DPairCILow/
+// DPairCIHigh bootstrap a 95% CI around DPair (REQ-MSR-07), advisory only —
+// same status as H/HNorm below, never gated; (6) H/HNorm additionally
+// cluster the matrix at simThreshold and take entropy over cluster sizes —
+// this is the only place simThreshold affects the result.
 func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 	res := internal.DispersionResult{SimThresh: simThreshold}
 
@@ -62,6 +64,7 @@ func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 
 	res.MeanSim = sum / float64(pairs)
 	res.DPair = 1 - res.MeanSim
+	res.DPairCILow, res.DPairCIHigh = bootstrapDPairCI(feats, bootstrapCIB, bootstrapCISeed)
 	res.H, res.Clusters = entropy(singleLinkage(sims, simThreshold))
 	// HNorm normalizes H by the maximum possible entropy for N samples
 	// (all N in separate singleton clusters, i.e. log2(N) bits) so H
