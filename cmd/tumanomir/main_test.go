@@ -3,15 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/valpere/tumanomir/internal"
 	"github.com/valpere/tumanomir/internal/instrument"
+	"github.com/valpere/tumanomir/internal/report"
 	"github.com/valpere/tumanomir/internal/spec"
 )
 
@@ -1384,5 +1387,301 @@ func TestRunGateImplDirectoryArgumentRejected(t *testing.T) {
 	}
 	if errOut == "" {
 		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestRunCheckFormatJSON is check's exact-JSON golden test (issue #92):
+// --format json must emit exactly one compact JSON object built from the
+// checkJSON wrapper, with no trailing "exit code: ..." text line appended
+// (unlike the text-format path).
+func TestRunCheckFormatJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spec.md")
+	content := "1. [REQ-X-01] Do the thing.\n   -> [FUN-X-01] DoThing()\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int { return runCheck([]string{"--format", "json", path}) })
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+
+	specs, err := spec.Load(path)
+	if err != nil {
+		t.Fatalf("spec.Load: %v", err)
+	}
+	th := internal.DefaultThresholds()
+	cr := aggregate(specs, th)
+	wantBytes, err := json.Marshal(checkJSON{Result: cr, Thresholds: th})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	want := string(wantBytes) + "\n" // json.Encoder.Encode appends a trailing newline
+	if out != want {
+		t.Fatalf("runCheck --format json =\n%q\nwant\n%q", out, want)
+	}
+}
+
+// TestRunCheckInvalidFormatFlag guards --format's usage-error path: any
+// value other than "text"/"json" must fail with exit code 2, mirroring
+// this codebase's other flag-validation error conventions.
+func TestRunCheckInvalidFormatFlag(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(path, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int { return runCheck([]string{"--format", "xml", path}) })
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestCheckJSONRoundTrip catches a checkJSON `json:` tag typo that would
+// otherwise silently drop a field with no other test noticing (issue #92).
+func TestCheckJSONRoundTrip(t *testing.T) {
+	orig := checkJSON{
+		Result: report.CheckResult{
+			KD:        internal.KDriftResult{Requirements: 2, Hanging: 1, HangingIDs: []string{"a.md: REQ-A-02"}, Value: 0.5},
+			DC:        internal.DConstResult{ConstraintMarkers: 3, ProseTokens: 6, Value: 3.0 / 9.0},
+			KDVerdict: internal.VerdictBlock,
+			DCVerdict: internal.VerdictWarn,
+		},
+		Thresholds: internal.DefaultThresholds(),
+	}
+
+	b, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var got checkJSON
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(orig, got) {
+		t.Fatalf("round-trip mismatch:\norig = %+v\ngot  = %+v", orig, got)
+	}
+}
+
+// TestRunMeasureImplFormatJSON is measure's exact-JSON golden test: builds
+// the expected report.MeasureResult by driving runMeasureWithGenerator
+// directly with the same fixed fake generator/config runMeasureImpl's own
+// CLI wiring would produce, then compares runMeasureImpl's --format json
+// stdout byte-for-byte against json.Marshal of the same measureJSON value.
+func TestRunMeasureImplFormatJSON(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	specContent := []byte("[REQ-X-01] x\n")
+	if err := os.WriteFile(specPath, specContent, 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	args := []string{
+		"--format", "json",
+		"--instrument", "ollama:m",
+		"--samples", "2",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	newGen := func(internal.InstrumentConfig) instrument.Generator {
+		return &fakeGenerator{fn: func(int) (instrument.Generation, error) { return genOK(goBlock(testSrcFoo)) }}
+	}
+
+	out, code := captureStdout(t, func() int { return runMeasureImpl(args, newGen) })
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+
+	th := internal.DefaultThresholds()
+	cfg := internal.InstrumentConfig{
+		Backend:       "ollama",
+		Model:         "m",
+		Temperature:   1.0,
+		Samples:       2,
+		NumCtx:        8192,
+		NumPredict:    2048,
+		SimThreshold:  0.95,
+		Prompt:        instrument.PromptV1,
+		PromptVersion: instrument.PromptVersion,
+	}
+	mr, err := runMeasureWithGenerator(newGen(cfg), cfg, specContent, 2, th)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator: %v", err)
+	}
+	wantBytes, err := json.Marshal(measureJSON{Result: mr, Thresholds: th})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	want := string(wantBytes) + "\n"
+	if out != want {
+		t.Fatalf("runMeasureImpl --format json =\n%q\nwant\n%q", out, want)
+	}
+}
+
+// TestRunMeasureInvalidFormatFlag mirrors TestRunCheckInvalidFormatFlag for
+// measure.
+func TestRunMeasureInvalidFormatFlag(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	args := []string{
+		"--format", "xml",
+		"--instrument", "ollama:m",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	errOut, code := captureStderr(t, func() int { return runMeasure(args) })
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestMeasureJSONRoundTrip catches a measureJSON `json:` tag typo.
+func TestMeasureJSONRoundTrip(t *testing.T) {
+	orig := measureJSON{
+		Result: report.MeasureResult{
+			Dispersion: internal.DispersionResult{
+				N: 5, Discarded: 3, MeanSim: 0.82, DPair: 0.18,
+				DPairCILow: 0.09, DPairCIHigh: 0.27, Clusters: 2,
+				SimThresh: 0.95, H: 1.37, HNorm: 0.59,
+			},
+			Config: internal.InstrumentConfig{
+				Backend: "ollama", Model: "qwen3-coder:30b", Temperature: 1.0,
+				Samples: 8, Think: false, NumCtx: 8192, NumPredict: 2048,
+				SimThreshold: 0.95, Prompt: "abcde", PromptVersion: "PromptV1",
+			},
+			DPairVerdict:         internal.VerdictOK,
+			DiscardRate:          3.0 / 8.0,
+			DiscardWarn:          true,
+			Truncated:            2,
+			PromptUnderestimated: 1,
+		},
+		Thresholds: internal.DefaultThresholds(),
+	}
+
+	b, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var got measureJSON
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(orig, got) {
+		t.Fatalf("round-trip mismatch:\norig = %+v\ngot  = %+v", orig, got)
+	}
+}
+
+// TestRunGateImplFormatJSON is gate's exact-JSON golden test, run in
+// deterministic-only mode (no instrument) so Measure is nil and the
+// omitempty tag's behavior is exercised too.
+func TestRunGateImplFormatJSON(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	content := []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n")
+	if err := os.WriteFile(specPath, content, 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int {
+		return runGateImpl([]string{"--format", "json", specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called in deterministic-only mode")
+			return nil
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+
+	specs, err := spec.Load(specPath)
+	if err != nil {
+		t.Fatalf("spec.Load: %v", err)
+	}
+	th := internal.DefaultThresholds()
+	cr := aggregate(specs, th)
+	verdict, exitCode := gateVerdict(cr.KDVerdict, cr.DCVerdict, nil)
+	rep := report.Report{Check: cr, Verdict: verdict, ExitCode: exitCode}
+	wantBytes, err := json.Marshal(gateJSON{Result: rep, Thresholds: th})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	want := string(wantBytes) + "\n"
+	if out != want {
+		t.Fatalf("runGateImpl --format json =\n%q\nwant\n%q", out, want)
+	}
+}
+
+// TestRunGateInvalidFormatFlag mirrors TestRunCheckInvalidFormatFlag for
+// gate; newGen must never be invoked since --format is validated before
+// any instrument-resolution logic runs.
+func TestRunGateInvalidFormatFlag(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int {
+		return runGateImpl([]string{"--format", "xml", specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called when --format validation fails")
+			return nil
+		})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if errOut == "" {
+		t.Fatal("want a non-empty actionable stderr message")
+	}
+}
+
+// TestGateJSONRoundTrip catches a gateJSON `json:` tag typo, including the
+// nested Measure pointer field (a non-nil case, so the round-trip actually
+// exercises the pointer's own fields, not just the "measure omitted"
+// shortcut TestRunGateImplFormatJSON's deterministic-only fixture takes).
+func TestGateJSONRoundTrip(t *testing.T) {
+	mr := report.MeasureResult{
+		Dispersion:   internal.DispersionResult{N: 4, DPair: 0.1, MeanSim: 0.9},
+		Config:       internal.InstrumentConfig{Backend: "ollama", Model: "m", Prompt: "p", PromptVersion: "PromptV1"},
+		DPairVerdict: internal.VerdictOK,
+	}
+	orig := gateJSON{
+		Result: report.Report{
+			Check: report.CheckResult{
+				KD:        internal.KDriftResult{Requirements: 1, Value: 0},
+				DC:        internal.DConstResult{ConstraintMarkers: 1, ProseTokens: 1, Value: 0.5},
+				KDVerdict: internal.VerdictOK,
+				DCVerdict: internal.VerdictOK,
+			},
+			Measure:  &mr,
+			Verdict:  internal.VerdictOK,
+			ExitCode: 0,
+		},
+		Thresholds: internal.DefaultThresholds(),
+	}
+
+	b, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var got gateJSON
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(orig, got) {
+		t.Fatalf("round-trip mismatch:\norig = %+v\ngot  = %+v", orig, got)
 	}
 }

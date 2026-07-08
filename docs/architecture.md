@@ -62,6 +62,9 @@ tumanomir version                       # надрукувати версію і
 --config  string  шлях до .tumanomir.yaml (за замовчуванням: завантажити
                    ./.tumanomir.yaml, якщо є, лише поточна директорія, без
                    пошуку вгору; явний --config має існувати і парситись)
+--format  string  формат виводу: "text" (за замовчуванням) або "json" —
+                   один compact JSON-об'єкт у stdout, поля/форма визначені
+                   json-тегами Go-структур (REQ-OUT-03)
 
 # check (і gate)
 --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)

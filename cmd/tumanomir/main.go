@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -44,6 +45,9 @@ Flags for check, measure, and gate:
   --config  string  path to a .tumanomir.yaml config file (default: load
                      ./.tumanomir.yaml if present, cwd only, no upward
                      search; a named --config path must exist and parse)
+  --format  string  output format: "text" (default) or "json" (one
+                     compact JSON object to stdout, field names/shape
+                     defined by the Go structs' json tags, see REQ-OUT-03)
 
 Flags for check (and gate):
   --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
@@ -162,6 +166,41 @@ func resolveConfig(args []string, cmdName string) (cfg config.Config, ok bool) {
 	return cfg, true
 }
 
+// validateFormatFlag checks --format's value against the two formats
+// check/measure/gate support, mirroring resolveConfig's/
+// validateMeasureFlags' cmdName-prefixed stderr convention. Any value other
+// than "text"/"json" is a usage error (exit 2), not a silent fallback to
+// text — an unrecognized value is more likely a typo a caller wants to
+// know about than an intentional request for the default.
+func validateFormatFlag(cmdName, format string) bool {
+	if format != "text" && format != "json" {
+		fmt.Fprintf(os.Stderr, "%s: --format must be \"text\" or \"json\", got %q\n", cmdName, format)
+		return false
+	}
+	return true
+}
+
+// checkJSON, measureJSON, and gateJSON pair each command's already-rendered
+// result with the internal.Thresholds it was gated against, for --format
+// json's single encoded object (REQ-OUT-03). Thresholds is not a field on
+// CheckResult/MeasureResult/Report themselves — those shapes were already
+// reviewed and settled in #82/#87 — so JSON mode composes it alongside the
+// result here instead.
+type checkJSON struct {
+	Result     report.CheckResult  `json:"result"`
+	Thresholds internal.Thresholds `json:"thresholds"`
+}
+
+type measureJSON struct {
+	Result     report.MeasureResult `json:"result"`
+	Thresholds internal.Thresholds  `json:"thresholds"`
+}
+
+type gateJSON struct {
+	Result     report.Report       `json:"result"`
+	Thresholds internal.Thresholds `json:"thresholds"`
+}
+
 // runCheck implements the `check` subcommand: the deterministic layer
 // (K_drift, D_const) — zero network, zero LLM. Parses flags, loads the
 // spec(s) via spec.Load, delegates to aggregate for the pure metric
@@ -177,11 +216,16 @@ func runCheck(args []string) int {
 	th := internal.DefaultThresholds()
 	cfg.ApplyThresholds(&th)
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	var configFlag string
+	var configFlag, formatFlag string
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
+	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
 	fs.Float64Var(&th.KDriftMax, "k-drift-max", th.KDriftMax, "max fraction of untraced requirements")
 	fs.Float64Var(&th.DConstMin, "d-const-min", th.DConstMin, "min lexical constraint density")
 	_ = fs.Parse(args)
+
+	if !validateFormatFlag("check", formatFlag) {
+		return 2
+	}
 
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "check: exactly one <file.md|dir> argument required")
@@ -195,6 +239,17 @@ func runCheck(args []string) int {
 	}
 
 	cr := aggregate(specs, th)
+
+	if formatFlag == "json" {
+		if err := json.NewEncoder(os.Stdout).Encode(checkJSON{Result: cr, Thresholds: th}); err != nil {
+			fmt.Fprintln(os.Stderr, "check:", err)
+			return 2
+		}
+		if cr.KDVerdict == internal.VerdictBlock {
+			return 1
+		}
+		return 0
+	}
 
 	if err := report.RenderCheck(os.Stdout, cr, th); err != nil {
 		fmt.Fprintln(os.Stderr, "check:", err)
@@ -349,6 +404,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 
 	var (
 		configFlag     string
+		formatFlag     string
 		instrumentFlag string
 		samples        int
 		temp           float64
@@ -358,6 +414,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		think          bool
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
+	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
 	fs.StringVar(&instrumentFlag, "instrument", instrumentDefault, "required, format backend:model (e.g. ollama:qwen3-coder:30b)")
 	fs.IntVar(&samples, "n", seeded.Samples, "number of generations to sample, must be >=2")
 	fs.IntVar(&samples, "samples", seeded.Samples, "alias for -n")
@@ -368,6 +425,10 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	_ = fs.Parse(args)
+
+	if !validateFormatFlag("measure", formatFlag) {
+		return 2
+	}
 
 	backend, model, ok := validateMeasureFlags("measure", instrumentFlag, samples, simThreshold, numCtx, numPredict)
 	if !ok {
@@ -415,6 +476,17 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "measure:", err)
 		return 2
+	}
+
+	if formatFlag == "json" {
+		if err := json.NewEncoder(os.Stdout).Encode(measureJSON{Result: mr, Thresholds: th}); err != nil {
+			fmt.Fprintln(os.Stderr, "measure:", err)
+			return 2
+		}
+		if mr.DPairVerdict == internal.VerdictBlock {
+			return 1
+		}
+		return 0
 	}
 
 	if err := report.RenderMeasure(os.Stdout, mr, th); err != nil {
@@ -576,6 +648,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 
 	var (
 		configFlag     string
+		formatFlag     string
 		instrumentFlag string
 		samples        int
 		temp           float64
@@ -585,6 +658,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 		think          bool
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
+	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
 	fs.Float64Var(&th.KDriftMax, "k-drift-max", th.KDriftMax, "max fraction of untraced requirements")
 	fs.Float64Var(&th.DConstMin, "d-const-min", th.DConstMin, "min lexical constraint density")
 	fs.StringVar(&instrumentFlag, "instrument", instrumentDefault, "format backend:model (e.g. ollama:qwen3-coder:30b); omit to run deterministic-only")
@@ -597,6 +671,10 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	_ = fs.Parse(args)
+
+	if !validateFormatFlag("gate", formatFlag) {
+		return 2
+	}
 
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "gate: exactly one <file.md> argument required")
@@ -672,6 +750,15 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	verdict, exitCode := gateVerdict(cr.KDVerdict, cr.DCVerdict, dpair)
 
 	rep := report.Report{Check: cr, Measure: mrPtr, Verdict: verdict, ExitCode: exitCode}
+
+	if formatFlag == "json" {
+		if err := json.NewEncoder(os.Stdout).Encode(gateJSON{Result: rep, Thresholds: th}); err != nil {
+			fmt.Fprintln(os.Stderr, "gate:", err)
+			return 2
+		}
+		return exitCode
+	}
+
 	if err := report.RenderReport(os.Stdout, rep, th); err != nil {
 		fmt.Fprintln(os.Stderr, "gate:", err)
 		return 2
