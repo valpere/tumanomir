@@ -18,6 +18,9 @@ Productization of the methodology from the article "Source of the Unknown"
 The roadmap (what's not built yet, and in what order) lives separately in
 [`roadmap.md`](roadmap.md). Tactical debt and small tasks live in
 [GitHub issues](https://github.com/valpere/tumanomir/issues), not here.
+The practical, example-driven user's guide lives separately in
+[`user-guide.en.md`](user-guide.en.md); this file is for
+developers/contributors (packages, the full flag table), not a tutorial.
 
 ## Metrics
 

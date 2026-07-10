@@ -38,8 +38,8 @@ bin/tumanomir check docs/requirements.md
 ```
 
 ```
-  K_drift:  0.00  [ok]     (threshold 0.20, 0/18 requirements untraced)
-  D_const:  0.07  [warn]   (threshold 0.35, 63 markers / 871 prose tokens)
+  K_drift:  0.00  [ok]     (threshold 0.20, 0/30 requirements untraced)
+  D_const:  0.03  [warn]   (threshold 0.35, 95 markers / 3161 prose tokens)
   D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)
 ```
 
@@ -67,6 +67,20 @@ required — `num-ctx` must have headroom for both the prompt and
 must be `>= 2` to compute a pairwise similarity. See `tumanomir --help`
 for the full flag list.
 
+`gate` runs both layers (or just the deterministic one, if no instrument
+resolves) in a single pass for CI, and `calibrate` correlates
+K_drift/D_const/D_pair against a labeled historical corpus of specs —
+neither auto-sets a threshold. An optional `.tumanomir.yaml` config file
+lets `check`/`measure`/`gate` read thresholds and instrument settings
+instead of repeating them as flags every time (CLI flag still wins). Add
+`--format json` to any of `check`/`measure`/`gate` for one compact JSON
+object on stdout instead of the TTY report.
+
+For worked examples of every command and flag, `.tumanomir.yaml`'s full
+schema, and a troubleshooting table of real error messages, see
+[`docs/user-guide.md`](docs/user-guide.md)
+([`.en.md`](docs/user-guide.en.md)).
+
 Exit codes: `0` gates pass · `1` gate failed · `2` error.
 
 All stochastic measurements are **instrument-relative**: results are
@@ -76,23 +90,23 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 
 ## Status
 
-v0.1 in development. See `docs/requirements.md` (written in tumanomir's
-own traceable markup — we eat our own dog food), `docs/architecture.md`
-for how it's built, and `docs/roadmap.md` for what's not built yet.
-
-- `check` (deterministic layer: `K_drift`, `D_const`) is **implemented**.
-- `measure` (stochastic layer: `D_pair`, `H_norm`) is **implemented**
-  end-to-end against Ollama (`docs/requirements.md` §2.2, REQ-MSR-01..06).
+v0.1 shipped: `check`, `measure`, `gate`, and `calibrate` are all
+**implemented** and work end-to-end. See `docs/requirements.md` (written
+in tumanomir's own traceable markup — we eat our own dog food),
+`docs/architecture.md` for how it's built, `docs/user-guide.md` for how to
+use it, and `docs/roadmap.md` for what's not built yet.
 
 ## Limitations
 
 `D_pair` measures generation spread at a **fixed instrument** (model +
 prompt + temperature + N). By itself, it cannot separate how much of that
 spread comes from spec ambiguity versus inherent model stochasticity/noise.
-Without a calibration baseline across multiple instruments/models (the
-roadmap `calibrate` command), a single `D_pair` number should be read as
-"spread under this specific instrument," not as an instrument-independent
-measure of "how foggy the spec truly is."
+`calibrate` (see the user's guide) correlates `D_pair` against a
+caller-defined outcome on your own historical corpus, but a real
+outcome-labeled corpus is still being accumulated (see `docs/roadmap.md`)
+— until then, a single `D_pair` number should be read as "spread under
+this specific instrument," not as an instrument-independent measure of
+"how foggy the spec truly is."
 
 The "copy-floor" reference point (feeding the model already-complete,
 unambiguous Go type definitions produced `H=0` in the source experiment) is
