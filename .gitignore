@@ -38,9 +38,22 @@ go.work.sum
 *.test
 tmp/
 
-# Claude Code project tooling (skills/agents/hooks/session data) and
-# self-learn scaffolding — local to this workspace, not committed (yet).
-.claude/
+# Claude Code project tooling — only runtime/per-machine state below
+# is untracked; agents/, hooks/, and skills/ are intentionally tracked so
+# they're reviewable and recoverable (see also ~/.claude/CLAUDE.md).
+# Defensive: settings.local.json could legitimately diverge per machine
+# in the future; current content IS shareable, but keep the option open.
+.claude/settings.local.json
+# session-recall runtime state
+.claude/sessions.db
+.claude/sessions.db-shm
+.claude/sessions.db-wal
+.claude/session-log.md
+# fix-review run history (per machine)
+.claude/skills/fix-review/telemetry.jsonl
+# scratch dirs
+.claude/plans/
+.claude/.worktrees/
 _patterns/
 _knowledge-base/
 
