@@ -131,7 +131,7 @@ Session ends (exit / /exit)
   └─ Stop hook: .claude/hooks/session-end.sh   (installed, active)
        ├─ Skip if /session-end ran within 2h (file mtime check)
        ├─ Try agy -p        — Gemini 3.5 Flash (Low → Medium → High), then Gemini 3.1 Pro
-       ├─ Try opencode run  — ollama/glm-5:cloud, kimi-k2.5:cloud, minimax-m2.5:cloud, qwen3-coder-next:cloud
+       ├─ Try opencode run  — ollama/glm-5.2:cloud, kimi-k2.6:cloud, minimax-m2.7:cloud, qwen3.5:cloud
        ├─ Fallback: raw transcript excerpt
        └─ Rotates session-log.md to last 10 entries (count-based, no age filtering)
 
