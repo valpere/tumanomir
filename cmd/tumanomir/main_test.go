@@ -1809,3 +1809,266 @@ func TestDispatchCalibrate(t *testing.T) {
 		t.Fatalf("want a row-count summary line, got output:\n%s", out)
 	}
 }
+
+// captureBoth runs fn with both os.Stdout and os.Stderr redirected to pipes
+// and returns (stdout, stderr, exitCode). Uses the same pipe-deadlock-safe
+// goroutine-drain design as captureStdout/captureStderr.
+func captureBoth(t *testing.T, fn func() int) (stdout, stderr string, code int) {
+	t.Helper()
+
+	// Set up stdout pipe.
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe (stdout): %v", err)
+	}
+	origOut := os.Stdout
+	os.Stdout = wOut
+	defer func() { os.Stdout = origOut }()
+
+	// Set up stderr pipe.
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe (stderr): %v", err)
+	}
+	origErr := os.Stderr
+	os.Stderr = wErr
+	defer func() { os.Stderr = origErr }()
+
+	// Drain both pipes concurrently (same deadlock-avoidance as the
+	// single-capture helpers).
+	outDone := make(chan struct{})
+	var outBuf bytes.Buffer
+	var outErr error
+	go func() {
+		_, outErr = io.Copy(&outBuf, rOut)
+		close(outDone)
+	}()
+
+	errDone := make(chan struct{})
+	var errBuf bytes.Buffer
+	var errCopyErr error
+	go func() {
+		_, errCopyErr = io.Copy(&errBuf, rErr)
+		close(errDone)
+	}()
+
+	code = fn()
+
+	if err := wOut.Close(); err != nil {
+		t.Fatalf("close stdout pipe writer: %v", err)
+	}
+	if err := wErr.Close(); err != nil {
+		t.Fatalf("close stderr pipe writer: %v", err)
+	}
+	<-outDone
+	<-errDone
+	if outErr != nil {
+		t.Fatalf("read stdout pipe: %v", outErr)
+	}
+	if errCopyErr != nil {
+		t.Fatalf("read stderr pipe: %v", errCopyErr)
+	}
+	return outBuf.String(), errBuf.String(), code
+}
+
+// --- gate --explain (REQ-GATE-04) ---
+
+// TestRunGateImplExplainKDriftBlock: deterministic-only mode (no
+// instrument), spec with untraced requirements so K_drift blocks.
+// Assert: K_drift line on stderr, no D_pair line, exit 1.
+func TestRunGateImplExplainKDriftBlock(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	stdout, stderr, code := captureBoth(t, func() int {
+		return runGateImpl([]string{"--explain", specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called in deterministic-only mode")
+			return nil
+		})
+	})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "K_drift blocked") {
+		t.Fatalf("want K_drift blocked line on stderr, got:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "deterministic") {
+		t.Fatalf("want 'deterministic' in K_drift line, got:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "D_pair blocked") {
+		t.Fatalf("must not print D_pair line in deterministic-only mode, got:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "K_drift") {
+		t.Fatalf("want the text report on stdout, got:\n%s", stdout)
+	}
+}
+
+// TestRunGateImplExplainDPairBlock: instrument configured, K_drift passes
+// (traced requirements), fake generator produces structurally divergent
+// generations so D_pair blocks. Assert: D_pair line on stderr says
+// "stochastic", no K_drift line, exit 1.
+func TestRunGateImplExplainDPairBlock(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{
+		"--explain",
+		"--instrument", "ollama:m",
+		"--samples", "2",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	srcs := []string{testSrcFoo, testSrcBar}
+
+	stdout, stderr, code := captureBoth(t, func() int {
+		return runGateImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+			return &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+				return genOK(goBlock(srcs[call%len(srcs)]))
+			}}
+		})
+	})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "D_pair blocked") {
+		t.Fatalf("want D_pair blocked line on stderr, got:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "stochastic") {
+		t.Fatalf("want 'stochastic' in D_pair line, got:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "K_drift blocked") {
+		t.Fatalf("must not print K_drift line when K_drift passes, got:\n%s", stderr)
+	}
+}
+
+// TestRunGateImplExplainBothBlock: both K_drift and D_pair block.
+// Assert: both lines on stderr, exit 1.
+func TestRunGateImplExplainBothBlock(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{
+		"--explain",
+		"--instrument", "ollama:m",
+		"--samples", "2",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	srcs := []string{testSrcFoo, testSrcBar}
+
+	_, stderr, code := captureBoth(t, func() int {
+		return runGateImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+			return &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+				return genOK(goBlock(srcs[call%len(srcs)]))
+			}}
+		})
+	})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "K_drift blocked") {
+		t.Fatalf("want K_drift blocked line on stderr, got:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "D_pair blocked") {
+		t.Fatalf("want D_pair blocked line on stderr, got:\n%s", stderr)
+	}
+}
+
+// TestRunGateImplExplainSkippedNotBlocked: D_pair verdict is VerdictSkipped
+// (fewer than 2 valid samples — all generations invalid), K_drift blocks.
+// Assert: K_drift line on stderr, NO D_pair line (Skipped is not Block),
+// exit 1.
+func TestRunGateImplExplainSkippedNotBlocked(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{
+		"--explain",
+		"--instrument", "ollama:m",
+		"--samples", "2",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	const invalidText = "no fenced go block here at all\n"
+
+	_, stderr, code := captureBoth(t, func() int {
+		return runGateImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+			return &fakeGenerator{fn: func(int) (instrument.Generation, error) {
+				return genOK([]byte(invalidText))
+			}}
+		})
+	})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "K_drift blocked") {
+		t.Fatalf("want K_drift blocked line on stderr, got:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "D_pair blocked") {
+		t.Fatalf("must not print D_pair blocked line when DPairVerdict is Skipped, got:\n%s", stderr)
+	}
+}
+
+// TestRunGateImplExplainNoOpOnPass: passing run (exit 0), --explain passed.
+// Assert: no stderr output at all.
+func TestRunGateImplExplainNoOpOnPass(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	_, stderr, code := captureBoth(t, func() int {
+		return runGateImpl([]string{"--explain", specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called in deterministic-only mode")
+			return nil
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr:\n%s", code, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("want no stderr output on a passing run, got:\n%s", stderr)
+	}
+}
+
+// TestRunGateImplExplainNoOpInJSONMode: --format json --explain together.
+// Assert: stdout is exactly one clean JSON object, stderr is empty (no
+// explain output at all in JSON mode).
+func TestRunGateImplExplainNoOpInJSONMode(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	stdout, stderr, code := captureBoth(t, func() int {
+		return runGateImpl([]string{"--format", "json", "--explain", specPath}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called in deterministic-only mode")
+			return nil
+		})
+	})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("want no stderr output in JSON mode, got:\n%s", stderr)
+	}
+	// Verify stdout is valid JSON (one clean object).
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v; got:\n%s", err, stdout)
+	}
+}

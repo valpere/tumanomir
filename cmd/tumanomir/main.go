@@ -56,6 +56,12 @@ Flags for check, measure, and gate:
                      compact JSON object to stdout, field names/shape
                      defined by the Go structs' json tags, see REQ-OUT-03)
 
+Flags for gate only:
+  --explain  bool    on non-zero exit, print which layer(s) failed and
+                     whether each is deterministic (K_drift) or stochastic
+                     (D_pair) to stderr — text mode only, no effect on the
+                     exit code or stdout report (REQ-GATE-04)
+
 Flags for check (and gate):
   --k-drift-max  float   gate: max fraction of untraced requirements (default 0.20)
   --d-const-min  float   warn: min lexical constraint density (default 0.35)
@@ -671,6 +677,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 		configFlag     string
 		formatFlag     string
 		instrumentFlag string
+		explain        bool
 		samples        int
 		temp           float64
 		simThreshold   float64
@@ -680,6 +687,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
+	fs.BoolVar(&explain, "explain", false, "on non-zero exit, print which layer(s) failed and whether each is deterministic or stochastic (stderr only, text mode only)")
 	fs.Float64Var(&th.KDriftMax, "k-drift-max", th.KDriftMax, "max fraction of untraced requirements")
 	fs.Float64Var(&th.DConstMin, "d-const-min", th.DConstMin, "min lexical constraint density")
 	fs.StringVar(&instrumentFlag, "instrument", instrumentDefault, "format backend:model (e.g. ollama:qwen3-coder:30b); omit to run deterministic-only")
@@ -771,6 +779,22 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	verdict, exitCode := gateVerdict(cr.KDVerdict, cr.DCVerdict, dpair)
 
 	rep := report.Report{Check: cr, Measure: mrPtr, Verdict: verdict, ExitCode: exitCode}
+
+	// --explain prints a per-verdict human-readable classification to stderr,
+	// text mode only — no effect on the exit code, the stdout report, or JSON
+	// output (REQ-GATE-04). Keyed on each verdict individually, not on the
+	// overall exit code: K_drift line iff KDVerdict==Block, D_pair line iff
+	// Measure!=nil && DPairVerdict==Block. VerdictSkipped is NOT Block, so a
+	// D_pair that couldn't compute (too few valid samples) doesn't print a
+	// "blocked" line even if a concurrent K_drift block makes exit != 0.
+	if explain && formatFlag == "text" {
+		if cr.KDVerdict == internal.VerdictBlock {
+			fmt.Fprintln(os.Stderr, "⚠ K_drift blocked (deterministic — traceability markup broken, not a model artifact)")
+		}
+		if mrPtr != nil && mrPtr.DPairVerdict == internal.VerdictBlock {
+			fmt.Fprintln(os.Stderr, "⚠ D_pair blocked (stochastic — threshold breach under this instrument; a rerun may land differently)")
+		}
+	}
 
 	if formatFlag == "json" {
 		if err := json.NewEncoder(os.Stdout).Encode(gateJSON{Result: rep, Thresholds: th}); err != nil {

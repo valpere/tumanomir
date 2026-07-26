@@ -52,7 +52,7 @@ make ci        # build + vet + test + lint + dogfood, все разом
 bin/tumanomir check docs/requirements.md
 ```
 
-```
+```text
   K_drift:  0.00  [ok]     (threshold 0.20, 0/30 requirements untraced)
   D_const:  0.03  [warn]   (threshold 0.35, 95 markers / 3161 prose tokens)
   D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)
@@ -265,6 +265,39 @@ gate: --temp was passed but no instrument resolved (no --instrument and no .tuma
 
 Це той самий клас бага цілісності виміру, що й silent truncation у
 REQ-MSR-06 — не зручність, яку можна вимкнути.
+
+**`--explain`: який шар не пройшов.** На non-zero exit `--explain` друкує
+в stderr один рядок на кожен заблокований шар — з класифікацією
+детермінований/стохастичний:
+
+```bash
+bin/tumanomir gate --explain docs/investigation/_sanity/specs/sharp.md
+```
+
+```
+  K_drift:  0.00  [ok]     (threshold 0.20, 0/3 requirements untraced)
+  D_const:  0.11  [warn]   (threshold 0.35, 10 markers / 84 prose tokens)
+  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)
+
+exit code: 0 (gates pass)
+```
+
+(Цей спек проходить — `--explain` нічого не друкує на passing run.) На
+спеку, де K_drift блокує:
+
+```
+⚠ K_drift blocked (deterministic — traceability markup broken, not a model artifact)
+```
+
+І якщо D_pair блокує (прилад визначено, генерації розійшлись за порогом):
+
+```
+⚠ D_pair blocked (stochastic — threshold breach under this instrument; a rerun may land differently)
+```
+
+`--explain` — no-op у `--format json` (JSON вже несе per-verdict поля) й
+на passing runs. Не впливає на exit code, stdout report або JSON-схему
+(REQ-GATE-04).
 
 ### 4.4. `calibrate`
 
