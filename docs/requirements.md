@@ -315,9 +315,28 @@ for exactly that reason.
     -> [FUN-GATE-03] cmd/tumanomir's gateVerdict(kd, dc internal.Verdict,
        dpair *internal.Verdict) (internal.Verdict, int)
 
+23. [REQ-GATE-04] `gate` must accept a `--explain` bool flag that, on a
+    non-zero exit in text mode (not `--format json`), prints to **stderr**
+    a human-readable classification of which layer(s) failed and whether
+    each failure is deterministic (K_drift) or stochastic (D_pair). The
+    classification is keyed per-verdict, not on the overall exit code:
+    the K_drift line prints iff `Check.KDVerdict == block`; the D_pair
+    line prints iff `Measure != nil && Measure.DPairVerdict == block`
+    (so a deterministic-only run never prints a D_pair line, and
+    `DPairVerdict == skipped` does not print a "blocked" line).
+    `--explain` is a full no-op in `--format json` mode (the JSON caller
+    already has the per-verdict fields on the wire) and on passing runs.
+    It has no effect on `Report`, `ExitCode`, `Verdict`, or the stdout
+    contract. `--explain` is not a measure-specific flag (it must not
+    trigger REQ-GATE-02's contradiction guard when passed without an
+    instrument).
+    -> [FUN-GATE-04] cmd/tumanomir's runGateImpl explain-stderr logic
+       (the `if explain && formatFlag == "text"` block printing per-verdict
+       classification lines to os.Stderr)
+
 ### 2.6 Calibrate command
 
-23. [REQ-CAL-01] `calibrate` must accept a single JSONL corpus file, one
+24. [REQ-CAL-01] `calibrate` must accept a single JSONL corpus file, one
     row per historical spec: `{"spec_path": "...", "instrument":
     "ollama:qwen3-coder:30b", "d_pair": 0.27, "outcome": 0.8}`. `spec_path`
     must point to the immutable spec version that produced the paired
@@ -333,7 +352,7 @@ for exactly that reason.
        (rows []Row, skipped int, err error), calibrate.AnalyzedRow,
        calibrate.BuildAnalyzedRows(rows []Row) ([]AnalyzedRow, error)
 
-24. [REQ-CAL-02] `instrument` is a required opaque identifier for the
+25. [REQ-CAL-02] `instrument` is a required opaque identifier for the
     `InstrumentConfig` that produced a row's `d_pair`. All rows in one
     `calibrate` run must share the same `instrument` value — mixing
     instruments would produce an authoritative-looking but
@@ -349,7 +368,7 @@ for exactly that reason.
        valid row naming a different Instrument returns an error
        immediately)
 
-25. [REQ-CAL-03] For each of K_drift.Value, D_const.Value, and D_pair,
+26. [REQ-CAL-03] For each of K_drift.Value, D_const.Value, and D_pair,
     `calibrate` must compute the Spearman rank correlation (not Pearson —
     `outcome`'s arbitrary, caller-defined scale means only a monotonic
     relationship is meaningful to test, and Spearman degrades correctly
@@ -367,7 +386,7 @@ for exactly that reason.
        split via medianSplit); cmd/tumanomir's renderCalibration prints
        the result with no threshold recommendation and no config write
 
-26. [REQ-CAL-04] A corpus row that fails to parse, has an unreadable
+27. [REQ-CAL-04] A corpus row that fails to parse, has an unreadable
     `spec_path`, or has `d_pair`/`outcome` outside `[0,1]` is skipped and
     counted — never silently dropped without a count, and never aborting
     the whole run (that treatment is reserved for REQ-CAL-02's
@@ -381,7 +400,7 @@ for exactly that reason.
        2); calibrate.MinRowsForCalibration,
        CalibrationResult.SmallSample
 
-27. [REQ-CAL-05] `calibrate` must never invoke an LLM or make a network
+28. [REQ-CAL-05] `calibrate` must never invoke an LLM or make a network
     call: `d_pair` comes pre-computed from the corpus, K_drift/D_const
     recompute via the existing zero-network `internal/metrics` functions,
     and the correlation math is pure arithmetic. This is the same
@@ -394,7 +413,7 @@ for exactly that reason.
 
 ## 3. Non-functional requirements
 
-28. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+29. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -417,7 +436,7 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-29. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+30. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
     (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
@@ -425,7 +444,7 @@ for exactly that reason.
     -> [PHY-NFR-02] go.mod with exactly one external require:
        gopkg.in/yaml.v3
 
-30. [REQ-NFR-03] Methodology invariants must not be silently changed:
+31. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.

@@ -90,6 +90,11 @@ tumanomir version                       # надрукувати версію і
 --num-predict    int     required: max generated tokens; must exceed natural output length
 --think          bool    enable reasoning-model think mode (default false)
 --d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
+
+# gate only
+--explain        bool    on non-zero exit, print which layer(s) failed and
+                          whether each is deterministic or stochastic
+                          (stderr only, text mode only; REQ-GATE-04)
 ```
 
 `gate` падає з exit code 2, якщо будь-який measure-специфічний прапорець

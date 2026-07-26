@@ -267,6 +267,40 @@ gate: --temp was passed but no instrument resolved (no --instrument and no .tuma
 This is the same class of measurement-integrity bug as silent truncation
 in REQ-MSR-06 — not a convenience that can be turned off.
 
+**`--explain`: which layer failed.** On non-zero exit, `--explain` prints
+to stderr one line per blocked layer — with a deterministic/stochastic
+classification:
+
+```bash
+bin/tumanomir gate --explain docs/investigation/_sanity/specs/sharp.md
+```
+
+```
+  K_drift:  0.00  [ok]     (threshold 0.20, 0/3 requirements untraced)
+  D_const:  0.11  [warn]   (threshold 0.35, 10 markers / 84 prose tokens)
+  D_pair:   —     (stochastic layer: run `tumanomir measure` with an instrument)
+
+exit code: 0 (gates pass)
+```
+
+(This spec passes — `--explain` prints nothing on a passing run.) On a
+spec where K_drift blocks:
+
+```
+⚠ K_drift blocked (deterministic — traceability markup broken, not a model artifact)
+```
+
+And if D_pair blocks (instrument configured, generations diverged past
+the threshold):
+
+```
+⚠ D_pair blocked (stochastic — threshold breach under this instrument; a rerun may land differently)
+```
+
+`--explain` is a no-op in `--format json` (JSON already carries per-verdict
+fields) and on passing runs. It has no effect on the exit code, the stdout
+report, or the JSON schema (REQ-GATE-04).
+
 ### 4.4. `calibrate`
 
 `calibrate` never touches the network or invokes an LLM — `d_pair` is
