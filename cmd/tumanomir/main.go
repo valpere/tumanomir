@@ -505,6 +505,25 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		return 2
 	}
 
+	// Opt-in corpus accretion (issue #107): off by default (config.CorpusEnabled
+	// is false unless .tumanomir.yaml explicitly sets corpus.enabled: true). When
+	// enabled, append one unlabeled row to the configured corpus file,
+	// deduped on (spec_hash, instrument) so re-running measure on an
+	// unchanged spec+instrument is idempotent. Failures are surfaced via
+	// stderr but do NOT change the exit code — a broken corpus write
+	// should not poison a successful measure run.
+	if fileCfg.CorpusEnabled() {
+		instStr := calibrate.InstrumentConfigString(cfg)
+		if err := calibrate.AppendRow(fileCfg.CorpusPath(), calibrate.RowToWrite{
+			SpecContent: specContent,
+			SpecPath:    path,
+			Instrument:  instStr,
+			DPair:       mr.Dispersion.DPair,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "measure: corpus append failed: %v\n", err)
+		}
+	}
+
 	if formatFlag == "json" {
 		if err := json.NewEncoder(os.Stdout).Encode(measureJSON{Result: mr, Thresholds: th}); err != nil {
 			fmt.Fprintln(os.Stderr, "measure:", err)
@@ -871,13 +890,13 @@ func runCalibrate(args []string) int {
 		return 2
 	}
 
-	rows, skipped, err := calibrate.LoadCorpus(fs.Arg(0))
+	rows, skipped, unlabeled, err := calibrate.LoadCorpus(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "calibrate:", err)
 		return 2
 	}
 	if len(rows) == 0 {
-		fmt.Fprintf(os.Stderr, "calibrate: zero valid rows in corpus (%d skipped) — nothing to correlate\n", skipped)
+		fmt.Fprintf(os.Stderr, "calibrate: zero valid rows in corpus (%d skipped, %d unlabeled) — nothing to correlate\n", skipped, unlabeled)
 		return 2
 	}
 
@@ -887,7 +906,7 @@ func runCalibrate(args []string) int {
 		return 2
 	}
 
-	renderCalibration(calibrate.Analyze(analyzed), skipped)
+	renderCalibration(calibrate.Analyze(analyzed), skipped, unlabeled)
 	return 0
 }
 
@@ -901,8 +920,12 @@ func runCalibrate(args []string) int {
 // io.Writer parameter for the same single-caller reason (this file's
 // other direct-to-stdout prints, e.g. the `version` subcommand, follow
 // the same pattern).
-func renderCalibration(r calibrate.CalibrationResult, skipped int) {
-	fmt.Printf("Calibration over %d valid row(s), %d skipped\n\n", r.Rows, skipped)
+func renderCalibration(r calibrate.CalibrationResult, skipped, unlabeled int) {
+	fmt.Printf("Calibration over %d valid row(s), %d skipped", r.Rows, skipped)
+	if unlabeled > 0 {
+		fmt.Printf(", %d unlabeled", unlabeled)
+	}
+	fmt.Println()
 	if r.SmallSample {
 		fmt.Printf("⚠ fewer than %d valid rows — correlation coefficients below are not statistically meaningful yet\n\n", calibrate.MinRowsForCalibration)
 	}

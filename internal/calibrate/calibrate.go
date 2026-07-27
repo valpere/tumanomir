@@ -3,53 +3,79 @@ package calibrate
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/valpere/tumanomir/internal"
 	"github.com/valpere/tumanomir/internal/metrics"
 	"github.com/valpere/tumanomir/internal/spec"
 )
 
 // corpusRow is the on-disk JSONL shape (REQ-CAL-01): one row per
-// historical spec, spec_path pinned to an immutable snapshot.
+// historical spec, spec_path pinned to an immutable snapshot. Outcome
+// is *float64 so a missing/null field unmarshals to nil rather than 0.0
+// (a real correctness bug — see LoadCorpus for the full mechanism).
+// SpecHash is an optional field that auto-appended rows (Part A corpus
+// accretion) use as a measure-side dedup key; hand-built rows from
+// before this issue may omit it — LoadCorpus ignores it for backward
+// compat.
 type corpusRow struct {
-	SpecPath   string  `json:"spec_path"`
-	Instrument string  `json:"instrument"`
-	DPair      float64 `json:"d_pair"`
-	Outcome    float64 `json:"outcome"`
+	SpecPath   string   `json:"spec_path"`
+	Instrument string   `json:"instrument"`
+	DPair      float64  `json:"d_pair"`
+	Outcome    *float64 `json:"outcome,omitempty"`
+	SpecHash   *string  `json:"spec_hash,omitempty"`
+	TS         string   `json:"ts,omitempty"`
 }
 
-// LoadCorpus reads a JSONL corpus file, one Row per line. A line that
-// fails to parse as JSON, has an empty/missing instrument (REQ-CAL-02
-// calls it required — an empty string is not a meaningful identifier and
-// must not silently become the corpus baseline), whose spec_path can't be
-// opened, or whose d_pair/outcome falls outside [0,1] is skipped and
-// counted in skipped — never aborting the whole run (REQ-CAL-04).
+// LoadCorpus reads a JSONL corpus file, one Row per line, and returns the
+// parsed rows plus two distinct counts: skipped (rows rejected for
+// objective reasons — bad JSON, missing required fields, out-of-range
+// values, unreadable spec_path) and unlabeled (rows that parse cleanly
+// but have outcome absent/null — these are valid rows, just not yet
+// scored; Part A's auto-appended rows look like this).
 //
-// The first valid row's Instrument becomes the corpus baseline; any later
-// valid row naming a different Instrument aborts the load immediately
-// with an error naming both values. This is a hard abort, not a per-row
-// skip: mixing instruments would produce an authoritative-looking but
-// methodologically meaningless correlation, since D_pair values measured
-// under different instrument configurations aren't comparable
-// (REQ-MSR-04's instrument-relative invariant, REQ-CAL-02).
-func LoadCorpus(path string) (rows []Row, skipped int, err error) {
+// A line that fails to parse as JSON, has an empty/missing instrument
+// (REQ-CAL-02 calls it required — an empty string is not a meaningful
+// identifier and must not silently become the corpus baseline), whose
+// spec_path can't be opened, or whose d_pair falls outside [0,1] is
+// skipped and counted — never aborting the whole run (REQ-CAL-04).
+//
+// The first valid (non-skipped) row's Instrument becomes the corpus
+// baseline; any later valid row naming a different Instrument aborts the
+// load immediately with an error naming both values. This is a hard
+// abort, not a per-row skip: mixing instruments would produce an
+// authoritative-looking but methodologically meaningless correlation,
+// since D_pair values measured under different instrument configurations
+// aren't comparable (REQ-MSR-04's instrument-relative invariant,
+// REQ-CAL-02).
+//
+// Outcome validation: if Outcome is present (non-nil), it must be in
+// [0,1]. Crucially, a nil Outcome is NOT malformed — it's an unlabeled
+// row (a distinct bucket from skipped) and is counted in the unlabeled
+// return value, never in skipped. The naive `float64` zero-value
+// behavior (where `null` unmarshals to 0.0 and passes the range check)
+// would corrupt Spearman with fabricated "perfect" outcomes — the
+// *float64 design is the only correct fix.
+func LoadCorpus(path string) (rows []Row, skipped, unlabeled int, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer func() { _ = f.Close() }()
 
 	var baseline string
 	haveBaseline := false
 
-	// The default 64KB token limit is plenty for one JSONL row (a
-	// spec_path plus three scalars), but bufio.NewScanner's default max
-	// is also 64KB — raise it defensively rather than risk a bufio.
-	// ErrTooLong on some future corpus with unusually long paths.
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
@@ -64,7 +90,11 @@ func LoadCorpus(path string) (rows []Row, skipped int, err error) {
 			skipped++
 			continue
 		}
-		if raw.Instrument == "" || raw.DPair < 0 || raw.DPair > 1 || raw.Outcome < 0 || raw.Outcome > 1 {
+		if raw.Instrument == "" || raw.DPair < 0 || raw.DPair > 1 {
+			skipped++
+			continue
+		}
+		if raw.Outcome != nil && (*raw.Outcome < 0 || *raw.Outcome > 1) {
 			skipped++
 			continue
 		}
@@ -79,18 +109,176 @@ func LoadCorpus(path string) (rows []Row, skipped int, err error) {
 			baseline = raw.Instrument
 			haveBaseline = true
 		} else if raw.Instrument != baseline {
-			return nil, 0, fmt.Errorf("corpus mixes instruments %q and %q — all rows in one run must share the same instrument (REQ-MSR-04)", baseline, raw.Instrument)
+			return nil, 0, 0, fmt.Errorf("corpus mixes instruments %q and %q — all rows in one run must share the same instrument (REQ-MSR-04)", baseline, raw.Instrument)
 		}
 
-		// raw and Row share identical fields (differing only in JSON
-		// tags), so a type conversion is the idiomatic move here rather
-		// than a field-by-field struct literal (staticcheck S1016).
-		rows = append(rows, Row(raw))
+		// Build Row field-by-field rather than via `Row(raw)` type
+		// conversion: the *float64 Outcome field is the only difference
+		// from Row, and the staticcheck S1016 (ignore) comment from the
+		// previous shared-shape trick no longer applies.
+		row := Row{
+			SpecPath:   raw.SpecPath,
+			Instrument: raw.Instrument,
+			DPair:      raw.DPair,
+		}
+		if raw.Outcome != nil {
+			row.Outcome = *raw.Outcome
+			rows = append(rows, row)
+		} else {
+			// Unlabeled: a valid row that just isn't scored yet
+			// (Part A auto-appends these). Counted separately from
+			// skipped so a user can see "N labeled, M unlabeled" in
+			// calibrate's printed output. NOT in rows[] — Analyze
+			// only sees labeled rows.
+			unlabeled++
+		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return rows, skipped, nil
+	return rows, skipped, unlabeled, nil
+}
+
+// RowToWrite is the public input shape for AppendRow: the caller's
+// already-recomputed DPair value (and the spec content it was measured
+// from) plus the spec_path for human inspection. Path is informational
+// only — the dedup key is (SpecHash, Instrument).
+type RowToWrite struct {
+	SpecContent []byte
+	SpecPath    string
+	Instrument  string
+	DPair       float64
+}
+
+// appendRowDuplicate scans path (if it exists) for an existing row
+// matching (hash, instrument) — the (spec_hash, instrument) dedup key.
+// Its own function boundary (rather than an inline block inside
+// AppendRow) matters: the read handle's defer must fire before
+// AppendRow goes on to open the same path for writing, not linger open
+// until AppendRow itself returns.
+func appendRowDuplicate(path, hash, instrument string) (bool, error) {
+	existing, err := os.Open(path)
+	if err != nil {
+		return false, nil // no corpus file yet — nothing to dedup against
+	}
+	defer func() { _ = existing.Close() }()
+
+	sc := bufio.NewScanner(existing)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for sc.Scan() {
+		var row corpusRow
+		if err := json.Unmarshal(sc.Bytes(), &row); err != nil {
+			continue
+		}
+		if row.SpecHash != nil && *row.SpecHash == hash && row.Instrument == instrument {
+			return true, nil
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return false, fmt.Errorf("scan %s for dedup: %w", path, err)
+	}
+	return false, nil
+}
+
+// AppendRow writes one row to the corpus file at path, with Outcome left
+// nil (an "unlabeled" row — the auto-accretion model is that outcome is
+// filled in later by a separate process, not at measure time). Dedup
+// rule: if a row with the same (SpecHash, Instrument) already exists in
+// the file, the append is skipped — re-running measure on an unchanged
+// spec under the same instrument is idempotent with respect to the
+// corpus. Creates path's parent directory if missing (the default
+// corpus path, ".tumanomir/corpus.jsonl", would otherwise fail on a
+// project's very first --enabled measure run).
+//
+// Schema-ownership: this writer lives in internal/calibrate (same
+// package as LoadCorpus) so the on-disk row schema has exactly one
+// source of truth. The caller (cmd/tumanomir/runMeasureImpl) does not
+// construct the JSON row itself — it calls this function.
+//
+// SpecHash is sha256 of the spec content (so the spec_hash pins to the
+// exact content that produced this DPair, even if spec_path later
+// changes on disk).
+//
+// Not safe for concurrent callers writing the same path — v0.1 has no
+// file locking, matching the project's single-user-CLI stance (no
+// process is expected to run `measure --corpus` concurrently with
+// another against the same corpus file).
+//
+// Network-free: this function uses only os/os.Create/io, no net/*.
+// internal/nonetwork_test.go's guard set is unaffected.
+func AppendRow(path string, r RowToWrite) error {
+	hash := hashSpec(r.SpecContent)
+
+	dup, err := appendRowDuplicate(path, hash, r.Instrument)
+	if err != nil {
+		return err
+	}
+	if dup {
+		return nil // already there, idempotent
+	}
+
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create corpus directory %s: %w", dir, err)
+		}
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open %s for append: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	row := corpusRow{
+		SpecPath:   r.SpecPath,
+		Instrument: r.Instrument,
+		DPair:      r.DPair,
+		Outcome:    nil, // explicitly nil — unlabeled
+		SpecHash:   &hash,
+		TS:         time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	enc := json.NewEncoder(f)
+	if err := enc.Encode(row); err != nil {
+		return fmt.Errorf("encode corpus row: %w", err)
+	}
+	return nil
+}
+
+// hashSpec returns the sha256 hex digest of specContent — AppendRow's
+// dedup key component. Unexported: only AppendRow needs it, so
+// cmd/tumanomir never has to know the hash algorithm.
+func hashSpec(specContent []byte) string {
+	hash := sha256.Sum256(specContent)
+	return hex.EncodeToString(hash[:])
+}
+
+// InstrumentConfigString renders a full internal.InstrumentConfig as a
+// stable dedup-key string. Must encode every config field (temperature,
+// N, think, num_ctx, num_predict, sim_threshold — not just
+// backend:model) so two measurements at different settings never
+// silently collide under the dedup key and never let calibrate treat
+// methodologically non-comparable DPair values as comparable
+// (REQ-MSR-04). Prompt/PromptVersion are deliberately excluded — they
+// are not independently configurable (REQ-MSR-04), so including them
+// would add noise without adding discriminating power.
+func InstrumentConfigString(cfg internal.InstrumentConfig) string {
+	var b strings.Builder
+	b.WriteString(cfg.Backend)
+	b.WriteString(":")
+	b.WriteString(cfg.Model)
+	b.WriteString("|temp=")
+	b.WriteString(strconv.FormatFloat(cfg.Temperature, 'f', -1, 64))
+	b.WriteString("|n=")
+	b.WriteString(strconv.Itoa(cfg.Samples))
+	b.WriteString("|think=")
+	b.WriteString(strconv.FormatBool(cfg.Think))
+	b.WriteString("|ctx=")
+	b.WriteString(strconv.Itoa(cfg.NumCtx))
+	b.WriteString("|pred=")
+	b.WriteString(strconv.Itoa(cfg.NumPredict))
+	b.WriteString("|sim=")
+	b.WriteString(strconv.FormatFloat(cfg.SimThreshold, 'f', -1, 64))
+	return b.String()
 }
 
 // BuildAnalyzedRows recomputes K_drift/D_const fresh from each row's

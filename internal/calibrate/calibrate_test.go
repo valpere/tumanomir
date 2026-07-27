@@ -1,6 +1,9 @@
 package calibrate
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/rand"
@@ -8,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/valpere/tumanomir/internal"
 )
 
 // writeSpec writes a trivial spec file under dir and returns its path —
@@ -152,7 +157,7 @@ func TestLoadCorpusMalformedRowsSkippedAndCounted(t *testing.T) {
 	}
 	corpusPath := writeCorpus(t, dir, lines)
 
-	rows, skipped, err := LoadCorpus(corpusPath)
+	rows, skipped, _, err := LoadCorpus(corpusPath)
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
@@ -172,7 +177,7 @@ func TestLoadCorpusZeroValidRows(t *testing.T) {
 	}
 	corpusPath := writeCorpus(t, dir, lines)
 
-	rows, skipped, err := LoadCorpus(corpusPath)
+	rows, skipped, _, err := LoadCorpus(corpusPath)
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
@@ -194,7 +199,7 @@ func TestLoadCorpusInstrumentMismatchAborts(t *testing.T) {
 	}
 	corpusPath := writeCorpus(t, dir, lines)
 
-	_, _, err := LoadCorpus(corpusPath)
+	_, _, _, err := LoadCorpus(corpusPath)
 	if err == nil {
 		t.Fatal("want an error for a corpus mixing two distinct instrument values, got nil")
 	}
@@ -218,7 +223,7 @@ func TestLoadCorpusEmptyInstrumentSkipped(t *testing.T) {
 	}
 	corpusPath := writeCorpus(t, dir, lines)
 
-	rows, skipped, err := LoadCorpus(corpusPath)
+	rows, skipped, _, err := LoadCorpus(corpusPath)
 	if err != nil {
 		t.Fatalf("LoadCorpus: %v", err)
 	}
@@ -276,4 +281,271 @@ func TestBuildAnalyzedRowsUnreadableSpecPathErrors(t *testing.T) {
 	if _, err := BuildAnalyzedRows(rows); err == nil {
 		t.Fatal("want an error when a row's spec_path can no longer be read, got nil")
 	}
+}
+
+// --- Part A: corpus accretion (issue #107) ---
+
+// TestAppendRowCreatesNewFile: when the corpus file does not exist yet,
+// AppendRow creates it and writes one row with the expected shape
+// (spec_hash computed from specContent, instrument encoded as the full
+// InstrumentConfig string, d_pair copied through, outcome nil/omitted,
+// timestamp set).
+func TestAppendRowCreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corpus.jsonl")
+	specContent := []byte("package x\n")
+	specPath := writeSpec(t, dir, "spec.md")
+	inst := "ollama:qwen3-coder:30b|temp=1.000000|n=10|think=false|ctx=8192|pred=2048|sim=0.950000"
+
+	if err := AppendRow(path, RowToWrite{
+		SpecContent: specContent,
+		SpecPath:    specPath,
+		Instrument:  inst,
+		DPair:       0.27,
+	}); err != nil {
+		t.Fatalf("AppendRow: %v", err)
+	}
+
+	// AppendRow writes one row with nil Outcome (unlabeled). LoadCorpus
+	// therefore reports it via the unlabeled counter, not the labeled
+	// rows slice.
+	if got := loadCorpusForTest(t, path); got != 1 {
+		t.Fatalf("file has %d JSONL lines, want 1", got)
+	}
+	rows, skipped, unlabeled, err := LoadCorpus(path)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("labeled rows = %d, want 0 (AppendRow writes unlabeled, not labeled)", len(rows))
+	}
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0", skipped)
+	}
+	if unlabeled != 1 {
+		t.Errorf("unlabeled = %d, want 1", unlabeled)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus file: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"d_pair":0.27`)) {
+		t.Errorf("file does not contain d_pair:0.27: %s", data)
+	}
+	if !bytes.Contains(data, []byte(`"spec_path":`)) {
+		t.Errorf("file does not contain spec_path: %s", data)
+	}
+	wantHash := sha256.Sum256(specContent)
+	if !bytes.Contains(data, []byte(hex.EncodeToString(wantHash[:]))) {
+		t.Errorf("file's spec_hash does not match sha256(specContent) = %x: %s", wantHash, data)
+	}
+}
+
+// TestAppendRowCreatesMissingParentDir: the default corpus path
+// (.tumanomir/corpus.jsonl) has a parent directory that won't exist on
+// a project's first --enabled measure run — AppendRow must create it
+// rather than failing with ENOENT (fix-review, glm-5.1:cloud).
+func TestAppendRowCreatesMissingParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".tumanomir", "corpus.jsonl")
+	specPath := writeSpec(t, dir, "spec.md")
+
+	if err := AppendRow(path, RowToWrite{
+		SpecContent: []byte("package x\n"),
+		SpecPath:    specPath,
+		Instrument:  "ollama:m|temp=1.0|n=10|think=false|ctx=8192|pred=2048|sim=0.95",
+		DPair:       0.1,
+	}); err != nil {
+		t.Fatalf("AppendRow: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("corpus file not created: %v", err)
+	}
+}
+
+// TestAppendRowDedup: calling AppendRow twice with the same specHash and
+// instrument (regardless of whether the d_pair differs between calls)
+// must produce exactly one row on disk — the (spec_hash, instrument)
+// dedup rule. Only the FIRST call's d_pair should survive.
+func TestAppendRowDedup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corpus.jsonl")
+	specContent := []byte("package y\n")
+	specPath := writeSpec(t, dir, "spec.md")
+	inst := "ollama:qwen3-coder:30b|temp=1.000000|n=10|think=false|ctx=8192|pred=2048|sim=0.950000"
+
+	for _, d := range []float64{0.10, 0.20, 0.30} {
+		if err := AppendRow(path, RowToWrite{
+			SpecContent: specContent,
+			SpecPath:    specPath,
+			Instrument:  inst,
+			DPair:       d,
+		}); err != nil {
+			t.Fatalf("AppendRow(d=%f): %v", d, err)
+		}
+	}
+	if got := loadCorpusForTest(t, path); got != 1 {
+		t.Fatalf("dedup failed: file has %d JSONL lines, want 1 (same spec+instrument, only the first should be appended)", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus file: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"d_pair":0.1`)) {
+		t.Errorf("file should retain the FIRST call's d_pair=0.1, got: %s", data)
+	}
+}
+
+// TestAppendRowDedupBySpecHashOnly: the spec_hash is a *content* hash, so
+// two different spec contents (even at the same instrument) are NOT
+// dedup-collapsed — they are genuinely different rows.
+func TestAppendRowDedupBySpecHashOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "corpus.jsonl")
+	specPathA := writeSpec(t, dir, "a.md")
+	specPathB := writeSpec(t, dir, "b.md")
+	inst := "ollama:qwen3-coder:30b|temp=1.000000|n=10|think=false|ctx=8192|pred=2048|sim=0.950000"
+
+	if err := AppendRow(path, RowToWrite{SpecContent: []byte("package a\n"), SpecPath: specPathA, Instrument: inst, DPair: 0.1}); err != nil {
+		t.Fatalf("AppendRow a: %v", err)
+	}
+	if err := AppendRow(path, RowToWrite{SpecContent: []byte("package b\n"), SpecPath: specPathB, Instrument: inst, DPair: 0.2}); err != nil {
+		t.Fatalf("AppendRow b: %v", err)
+	}
+	if got := loadCorpusForTest(t, path); got != 2 {
+		t.Fatalf("file has %d JSONL lines, want 2 (different spec contents must be distinct rows)", got)
+	}
+}
+
+// TestLoadCorpusUnlabeledRowsCountedSeparately: a corpus mixing
+// labeled, unlabeled (no outcome), and genuinely malformed rows must
+// report three distinct counts and never let the unlabeled row's
+// `outcome: null` unmarshal to 0.0 and corrupt the analyzed rows.
+func TestLoadCorpusUnlabeledRowsCountedSeparately(t *testing.T) {
+	dir := t.TempDir()
+	goodSpec := writeSpec(t, dir, "good.md")
+	inst := "ollama:qwen3-coder:30b|temp=1.0|n=10|think=false|ctx=8192|pred=2048|sim=0.95"
+
+	lines := []string{
+		// labeled, valid
+		fmt.Sprintf(`{"spec_path":%q,"instrument":%q,"d_pair":0.2,"outcome":0.3}`, goodSpec, inst),
+		// unlabeled: outcome field absent entirely
+		fmt.Sprintf(`{"spec_path":%q,"instrument":%q,"d_pair":0.4}`, goodSpec, inst),
+		// unlabeled: outcome field explicitly null
+		fmt.Sprintf(`{"spec_path":%q,"instrument":%q,"d_pair":0.5,"outcome":null}`, goodSpec, inst),
+		// malformed: d_pair out of range
+		fmt.Sprintf(`{"spec_path":%q,"instrument":%q,"d_pair":1.5,"outcome":0.5}`, goodSpec, inst),
+		// malformed: bad JSON
+		`not valid json`,
+		// labeled, valid — different DPair to confirm ranking signal
+		fmt.Sprintf(`{"spec_path":%q,"instrument":%q,"d_pair":0.6,"outcome":0.7}`, goodSpec, inst),
+	}
+	corpusPath := writeCorpus(t, dir, lines)
+
+	rows, skipped, unlabeled, err := LoadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if skipped != 2 {
+		t.Errorf("skipped = %d, want 2 (d_pair>1, bad json)", skipped)
+	}
+	if unlabeled != 2 {
+		t.Errorf("unlabeled = %d, want 2 (absent outcome, null outcome)", unlabeled)
+	}
+	if len(rows) != 2 {
+		t.Errorf("len(rows) = %d, want 2 labeled rows", len(rows))
+	}
+	// The CRITICAL invariant: no unlabeled row is in rows[] — Analyze
+	// must never see a fabricated 0.0 outcome from a null field.
+	for i, r := range rows {
+		// D_pair is preserved as the labeled row's value (not 0.0).
+		if r.Outcome != 0.3 && r.Outcome != 0.7 {
+			t.Errorf("rows[%d].Outcome = %f, expected 0.3 or 0.7 (labeled)", i, r.Outcome)
+		}
+	}
+}
+
+// TestLoadCorpusToleratesMissingSpecHashField: a hand-built old-format
+// row (no spec_hash field) must still load — backward compat with the
+// pre-#107 schema.
+func TestLoadCorpusToleratesMissingSpecHashField(t *testing.T) {
+	dir := t.TempDir()
+	goodSpec := writeSpec(t, dir, "spec.md")
+	// Note: no spec_hash field at all.
+	lines := []string{
+		fmt.Sprintf(`{"spec_path":%q,"instrument":"ollama:m","d_pair":0.2,"outcome":0.3}`, goodSpec),
+	}
+	corpusPath := writeCorpus(t, dir, lines)
+
+	rows, _, _, err := LoadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("len(rows) = %d, want 1 (old-format row should still load)", len(rows))
+	}
+}
+
+// TestInstrumentConfigStringDistinguishes: two configs that differ in any
+// single field must produce different strings — dedup correctness.
+func TestInstrumentConfigStringDistinguishes(t *testing.T) {
+	base := func(mutate func(*internal.InstrumentConfig)) string {
+		cfg := internal.InstrumentConfig{
+			Backend: "ollama", Model: "m", Temperature: 1.0, Samples: 10,
+			Think: false, NumCtx: 8192, NumPredict: 2048, SimThreshold: 0.95,
+		}
+		if mutate != nil {
+			mutate(&cfg)
+		}
+		return InstrumentConfigString(cfg)
+	}
+	a := base(nil)
+	b := base(nil)
+	if a != b {
+		t.Errorf("identical configs produced different strings: %q vs %q", a, b)
+	}
+	// Each field that affects methodology should distinguish.
+	checks := []struct {
+		name string
+		x, y string
+	}{
+		{"temperature", base(nil), base(func(c *internal.InstrumentConfig) { c.Temperature = 0.5 })},
+		{"samples", base(nil), base(func(c *internal.InstrumentConfig) { c.Samples = 20 })},
+		{"think", base(nil), base(func(c *internal.InstrumentConfig) { c.Think = true })},
+		{"numCtx", base(nil), base(func(c *internal.InstrumentConfig) { c.NumCtx = 4096 })},
+		{"numPredict", base(nil), base(func(c *internal.InstrumentConfig) { c.NumPredict = 1024 })},
+		{"simThreshold", base(nil), base(func(c *internal.InstrumentConfig) { c.SimThreshold = 0.80 })},
+	}
+	for _, c := range checks {
+		if c.x == c.y {
+			t.Errorf("%s: two configs differing only in this field produced the same string %q", c.name, c.x)
+		}
+	}
+}
+
+// TestHashSpecStable: same content → same hash (caller relies on this for
+// dedup correctness).
+func TestHashSpecStable(t *testing.T) {
+	a := hashSpec([]byte("package x\ntype T struct{}"))
+	b := hashSpec([]byte("package x\ntype T struct{}"))
+	if a != b {
+		t.Errorf("same content produced different hashes: %q vs %q", a, b)
+	}
+	if a == hashSpec([]byte("package y\n")) {
+		t.Errorf("different content produced same hash %q", a)
+	}
+}
+
+// loadCorpusForTestForAppend is the helper for the AppendRow tests:
+// the appended rows have nil Outcome (they're unlabeled), so LoadCorpus
+// returns them via the unlabeled counter, NOT via the labeled `rows`
+// slice. We surface the raw JSONL line count from the file itself, which
+// is what the AppendRow tests actually care about (the row was written).
+func loadCorpusForTest(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus file: %v", err)
+	}
+	return bytes.Count(data, []byte("\n"))
 }
