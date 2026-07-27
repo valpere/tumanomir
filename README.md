@@ -28,6 +28,7 @@ Prerequisite: Go >= 1.26.
 
 ```bash
 make build     # -> bin/tumanomir
+make install   # -> $GOBIN/tumanomir (or $GOPATH/bin), on $PATH
 ```
 
 Sample run against tumanomir's own dogfooded spec (`make dogfood` runs the

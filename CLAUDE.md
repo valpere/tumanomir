@@ -64,6 +64,7 @@ The binary is built into `bin/` via `make`, not `go build`/`go run` directly.
 
 ```bash
 make build     # -> bin/tumanomir
+make install   # -> $GOBIN/tumanomir (or $GOPATH/bin), on $PATH
 make vet
 make test
 make dogfood   # bin/tumanomir check docs/requirements.md — dogfood smoke test

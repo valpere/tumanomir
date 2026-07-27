@@ -1,10 +1,13 @@
 BINARY := tumanomir
 BIN_DIR := bin
 
-.PHONY: build vet test lint dogfood verify ci clean
+.PHONY: build install vet test lint dogfood verify ci clean
 
 build:
 	go build -o $(BIN_DIR)/$(BINARY) ./cmd/tumanomir
+
+install:
+	go install ./cmd/tumanomir
 
 vet:
 	go vet ./...
