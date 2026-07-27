@@ -673,7 +673,7 @@ func TestSetOutcomeRejectsOutOfRangeScore(t *testing.T) {
 	lines := []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`}
 	path := writeCorpus(t, dir, lines)
 
-	for _, score := range []float64{-0.1, 1.1} {
+	for _, score := range []float64{-0.1, 1.1, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		if err := SetOutcome(path, "abc111", "", score); err == nil {
 			t.Fatalf("score=%v: want an error for an out-of-range outcome, got nil", score)
 		}
@@ -681,6 +681,52 @@ func TestSetOutcomeRejectsOutOfRangeScore(t *testing.T) {
 	got := readLines(t, path)
 	if got[0] != lines[0] {
 		t.Fatalf("file changed despite rejected score: got %s, want %s", got[0], lines[0])
+	}
+}
+
+// TestSetOutcomeAcceptsBoundaryScores: 0.0 and 1.0 are the inclusive
+// edges of the [0,1] range and must be accepted, not rejected by an
+// off-by-one comparison direction (fix-review, glm-5.1:cloud +
+// kimi-k2.6:cloud).
+func TestSetOutcomeAcceptsBoundaryScores(t *testing.T) {
+	for _, score := range []float64{0.0, 1.0} {
+		dir := t.TempDir()
+		path := writeCorpus(t, dir, []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`})
+		if err := SetOutcome(path, "abc111", "", score); err != nil {
+			t.Fatalf("score=%v: want no error for a boundary outcome, got: %v", score, err)
+		}
+		var row corpusRow
+		if err := json.Unmarshal([]byte(readLines(t, path)[0]), &row); err != nil {
+			t.Fatalf("score=%v: unmarshal updated row: %v", score, err)
+		}
+		if row.Outcome == nil || *row.Outcome != score {
+			t.Fatalf("score=%v: row.Outcome = %v, want %v", score, row.Outcome, score)
+		}
+	}
+}
+
+// TestAtomicRewriteLinesPreservesPermissions: os.CreateTemp always
+// creates with mode 0600, regardless of the original file's mode — the
+// rewrite must not silently tighten the corpus file's permissions on
+// every label call (fix-review, glm-5.1:cloud; independently
+// reproduced: os.CreateTemp's default mode really is 0600).
+func TestAtomicRewriteLinesPreservesPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := writeCorpus(t, dir, []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`})
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	if err := SetOutcome(path, "abc111", "", 0.5); err != nil {
+		t.Fatalf("SetOutcome: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("mode after rewrite = %v, want 0644 (unchanged from before the rewrite)", info.Mode().Perm())
 	}
 }
 

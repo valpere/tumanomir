@@ -2429,6 +2429,43 @@ func TestRunLabelInvalidScoreErrors(t *testing.T) {
 	}
 }
 
+// TestRunLabelWorksWithCorpusDisabled: label is a manual scoring action,
+// independent of measure's opt-in accretion switch (REQ-MSR-09) — it
+// must operate on the configured corpus path even when corpus.enabled
+// is false (or omitted) in .tumanomir.yaml (fix-review, glm-5.1:cloud).
+func TestRunLabelWorksWithCorpusDisabled(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	row := fmt.Sprintf(`{"spec_path":%q,"instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`, specPath)
+	if err := os.WriteFile(corpusPath, []byte(row+"\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	content := fmt.Sprintf("corpus:\n  enabled: false\n  path: %q\n", corpusPath)
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, code := captureStdout(t, func() int {
+		return runLabel([]string{"--config", configPath, "abc111", "0.6"})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 (label must work regardless of corpus.enabled)", code)
+	}
+
+	rows, _, _, err := calibrate.LoadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Outcome != 0.6 {
+		t.Fatalf("rows=%+v, want one row with outcome=0.6", rows)
+	}
+}
+
 // TestDispatchLabel confirms the `label` subcommand is wired into
 // dispatch, not just directly callable.
 func TestDispatchLabel(t *testing.T) {

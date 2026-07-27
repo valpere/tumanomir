@@ -273,7 +273,10 @@ func hashSpec(specContent []byte) string {
 //     without instrument; the caller must pass --instrument
 //  4. exactly one match (after any instrument filtering) -> set outcome
 func SetOutcome(path, hashPrefix, instrument string, score float64) error {
-	if score < 0 || score > 1 {
+	// math.IsNaN/IsInf checked explicitly: NaN compares false against
+	// both < 0 and > 1, so the range check alone would let it through
+	// (fix-review, deepseek-v4-flash:cloud + kimi-k2.6:cloud).
+	if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 		return fmt.Errorf("outcome score %v out of range [0,1]", score)
 	}
 
@@ -372,6 +375,16 @@ func scanCorpusLines(path string) (lines [][]byte, parsed []*corpusRow, err erro
 // same path — v0.1 has no file locking, the same single-user-CLI stance
 // AppendRow already documents.
 func atomicRewriteLines(path string, lines [][]byte) error {
+	// os.CreateTemp always creates with mode 0600 regardless of the
+	// original file's permissions — match the original's mode (0644 for
+	// a fresh AppendRow-created corpus) so a label call doesn't silently
+	// tighten the corpus file's permissions on every rewrite (fix-review,
+	// glm-5.1:cloud; independently reproduced).
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".corpus-*.tmp")
 	if err != nil {
@@ -384,6 +397,10 @@ func atomicRewriteLines(path string, lines [][]byte) error {
 			_ = os.Remove(tmpPath)
 		}
 	}()
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set corpus rewrite temp file permissions: %w", err)
+	}
 
 	w := bufio.NewWriter(tmp)
 	for _, line := range lines {
