@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/valpere/tumanomir/internal"
+	"github.com/valpere/tumanomir/internal/calibrate"
 	"github.com/valpere/tumanomir/internal/instrument"
 	"github.com/valpere/tumanomir/internal/report"
 	"github.com/valpere/tumanomir/internal/spec"
@@ -2070,5 +2071,169 @@ func TestRunGateImplExplainNoOpInJSONMode(t *testing.T) {
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v; got:\n%s", err, stdout)
+	}
+}
+
+// --- Part A: measure's opt-in corpus accretion (issue #107) ---
+
+// writeMeasureConfig writes a minimal .tumanomir.yaml enabling corpus
+// accretion at corpusPath, and returns the config file's path.
+func writeMeasureConfig(t *testing.T, dir, corpusPath string) string {
+	t.Helper()
+	configPath := filepath.Join(dir, "config.yaml")
+	content := fmt.Sprintf("corpus:\n  enabled: true\n  path: %q\n", corpusPath)
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return configPath
+}
+
+// TestRunMeasureImplCorpusDisabledByDefault: with no config file (or a
+// config file that doesn't enable corpus), a successful measure run must
+// NOT create a corpus file — off by default is the whole point of the
+// opt-in design (issue #107).
+func TestRunMeasureImplCorpusDisabledByDefault(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+
+	args := []string{
+		"--instrument", "ollama:m",
+		"--samples", "4",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	_, code := captureStdout(t, func() int {
+		return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator { return gen })
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	if _, err := os.Stat(corpusPath); !os.IsNotExist(err) {
+		t.Fatalf("corpus file was created despite no config enabling it: err=%v", err)
+	}
+}
+
+// TestRunMeasureImplAppendsCorpusRow: with corpus.enabled: true in
+// .tumanomir.yaml, a successful measure run appends exactly one row to
+// the configured corpus path.
+func TestRunMeasureImplAppendsCorpusRow(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	args := []string{
+		"--config", configPath,
+		"--instrument", "ollama:m",
+		"--samples", "4",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	_, code := captureStdout(t, func() int {
+		return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator { return gen })
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	data, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("corpus file was not created: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"spec_path":`)) || !bytes.Contains(data, []byte(specPath)) {
+		t.Fatalf("corpus row missing expected spec_path: %s", data)
+	}
+	if !bytes.Contains(data, []byte(`"instrument":"ollama:m`)) {
+		t.Fatalf("corpus row missing expected instrument prefix: %s", data)
+	}
+}
+
+// TestRunMeasureImplCorpusDedup: running measure twice on the same spec
+// content under the same instrument must append only one row — the
+// (spec_hash, instrument) dedup rule applies end-to-end through the CLI,
+// not just at the AppendRow unit level.
+func TestRunMeasureImplCorpusDedup(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	args := []string{
+		"--config", configPath,
+		"--instrument", "ollama:m",
+		"--samples", "4",
+		"--num-ctx", "8192",
+		"--num-predict", "2048",
+		specPath,
+	}
+	newGen := func(internal.InstrumentConfig) instrument.Generator {
+		return &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+			return genOK(goBlock(testSrcFoo))
+		}}
+	}
+
+	for i := 0; i < 2; i++ {
+		_, code := captureStdout(t, func() int { return runMeasureImpl(args, newGen) })
+		if code != 0 {
+			t.Fatalf("run %d: code = %d, want 0", i, code)
+		}
+	}
+
+	data, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("read corpus file: %v", err)
+	}
+	if lines := bytes.Count(data, []byte("\n")); lines != 1 {
+		t.Fatalf("corpus has %d lines after 2 identical measure runs, want 1 (dedup)", lines)
+	}
+}
+
+// TestCalibrateLoadCorpusCorpusFlowIntegration: a corpus file produced by
+// AppendRow (unlabeled row) plus a hand-labeled row must both be
+// recognized correctly by LoadCorpus — labeled goes to rows[], unlabeled
+// to the unlabeled counter, confirming the writer (calibrate.AppendRow)
+// and reader (calibrate.LoadCorpus) agree on the on-disk schema (single
+// schema owner, see calibrate.go's corpusRow doc comment).
+func TestCalibrateLoadCorpusCorpusFlowIntegration(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+
+	if err := calibrate.AppendRow(corpusPath, calibrate.RowToWrite{
+		SpecContent: []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"),
+		SpecPath:    specPath,
+		Instrument:  "ollama:m|temp=1.0|n=10|think=false|ctx=8192|pred=2048|sim=0.95",
+		DPair:       0.3,
+	}); err != nil {
+		t.Fatalf("AppendRow: %v", err)
+	}
+
+	rows, skipped, unlabeled, err := calibrate.LoadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if len(rows) != 0 || skipped != 0 || unlabeled != 1 {
+		t.Fatalf("rows=%d skipped=%d unlabeled=%d, want 0/0/1", len(rows), skipped, unlabeled)
 	}
 }

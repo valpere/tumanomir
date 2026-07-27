@@ -247,3 +247,46 @@ func withInstrument(def internal.InstrumentConfig, mutate func(*internal.Instrum
 	mutate(&def)
 	return def
 }
+
+// --- Corpus: opt-in accretion config (issue #107) ---
+
+func TestLoadCorpusSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".tumanomir.yaml")
+	content := `
+corpus:
+  enabled: true
+  path: /custom/corpus.jsonl
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.CorpusEnabled() {
+		t.Fatal("CorpusEnabled() = false, want true")
+	}
+	if got := cfg.CorpusPath(); got != "/custom/corpus.jsonl" {
+		t.Fatalf("CorpusPath() = %q, want /custom/corpus.jsonl", got)
+	}
+}
+
+func TestCorpusDisabledByDefault(t *testing.T) {
+	var cfg Config
+	if cfg.CorpusEnabled() {
+		t.Fatal("CorpusEnabled() = true for a zero-value Config, want false (off by default)")
+	}
+}
+
+func TestCorpusPathDefaultWhenEnabledWithoutPath(t *testing.T) {
+	cfg := Config{Corpus: &Corpus{Enabled: ptr(true)}}
+	if !cfg.CorpusEnabled() {
+		t.Fatal("CorpusEnabled() = false, want true")
+	}
+	if got := cfg.CorpusPath(); got != ".tumanomir/corpus.jsonl" {
+		t.Fatalf("CorpusPath() = %q, want default .tumanomir/corpus.jsonl", got)
+	}
+}

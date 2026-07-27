@@ -23,6 +23,7 @@ import (
 type Config struct {
 	Thresholds *Thresholds `yaml:"thresholds"`
 	Instrument *Instrument `yaml:"instrument"`
+	Corpus     *Corpus     `yaml:"corpus"`
 }
 
 // Thresholds is the config-file counterpart of internal.Thresholds.
@@ -43,6 +44,17 @@ type Instrument struct {
 	NumCtx       *int     `yaml:"num_ctx"`
 	NumPredict   *int     `yaml:"num_predict"`
 	SimThreshold *float64 `yaml:"sim_threshold"`
+}
+
+// Corpus is the opt-in control for `measure`'s corpus-accretion behavior:
+// when Enabled is set true, every successful `measure` invocation appends
+// one unlabeled row to the configured Path. Off by default — measure
+// never writes to disk unless the user explicitly opts in. Only
+// `internal/calibrate` reads/writes the corpus file; this struct is
+// purely the opt-in signal.
+type Corpus struct {
+	Enabled *bool   `yaml:"enabled"`
+	Path    *string `yaml:"path"`
 }
 
 // Load reads and parses the YAML config file at path. It returns an error
@@ -117,4 +129,23 @@ func (c Config) InstrumentOr(def internal.InstrumentConfig) internal.InstrumentC
 		def.SimThreshold = *i.SimThreshold
 	}
 	return def
+}
+
+// CorpusEnabled reports whether the user has opted in to corpus accretion
+// via .tumanomir.yaml's `corpus.enabled: true`. Nil on absence preserves
+// the project's "off by default" stance — measure never writes to disk
+// unless the user explicitly says so.
+func (c Config) CorpusEnabled() bool {
+	return c.Corpus != nil && c.Corpus.Enabled != nil && *c.Corpus.Enabled
+}
+
+// CorpusPath returns the configured corpus file path, or a sensible
+// default (".tumanomir/corpus.jsonl") if the user enabled corpus without
+// setting a path. Callers may resolve relative paths against the current
+// working directory.
+func (c Config) CorpusPath() string {
+	if c.Corpus != nil && c.Corpus.Path != nil && *c.Corpus.Path != "" {
+		return *c.Corpus.Path
+	}
+	return ".tumanomir/corpus.jsonl"
 }

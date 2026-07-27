@@ -392,6 +392,10 @@ instrument:
   num_ctx: 8192          # int, must have headroom for prompt + num_predict
   num_predict: 2048       # int
   sim_threshold: 0.95     # float, [0,1]
+corpus:
+  enabled: false          # bool; off by default — measure never writes
+                          # to disk unless you opt in (REQ-MSR-08)
+  path: .tumanomir/corpus.jsonl   # string; default shown
 ```
 
 `prompt`/`prompt_version` are deliberately absent from the schema — not
@@ -515,6 +519,16 @@ not tied to any specific project:
    small-sample warning disappears and the Spearman coefficients become a
    more meaningful signal for whether `D_pair` actually predicts your
    `outcome` on your instrument.
+
+Steps 1–2 above can be automated: set `corpus.enabled: true` in
+`.tumanomir.yaml` (§5) and every successful `measure` run appends a row
+for you — `spec_path`, `instrument`, and `d_pair` filled in, deduped on
+`(spec_hash, instrument)` so re-measuring an unchanged spec doesn't add
+duplicate rows. These rows have no `outcome` yet (`calibrate` reports
+them as "unlabeled," separate from valid/skipped) — step 3, labeling,
+is still a separate step; there is no `label` command in this version
+(tracked as a roadmap item, issue #108) — for now, label by hand-editing
+the corpus file's `outcome` field once the real outcome is known.
 
 ## 8. Troubleshooting
 

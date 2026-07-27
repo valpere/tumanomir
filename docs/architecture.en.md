@@ -113,6 +113,22 @@ writes to `.tumanomir.yaml` or proposes a single threshold (REQ-CAL-03/04).
 
 Output is human-readable in a TTY; exit code: 0 ok / 1 gate failed / 2 error.
 
+`measure` can optionally accrete a corpus for `calibrate` as a byproduct
+of normal use (REQ-MSR-08): `.tumanomir.yaml`'s `corpus.enabled: true`
+turns on appending one row per successful run to `corpus.path` (default
+`.tumanomir/corpus.jsonl`), off by default. The appended row carries a
+`spec_hash` (sha256 of the spec content — a measure-side dedup key only,
+not a replacement for `spec_path`'s own immutable-snapshot contract) and
+has no `outcome` — it's an "unlabeled" row: valid, just not yet scored.
+Dedup is on `(spec_hash, instrument)`, where `instrument` encodes the
+full InstrumentConfig (not just backend:model), so different instrument
+settings never silently collide under the same key. `calibrate`'s
+`LoadCorpus` counts unlabeled rows separately from valid and skipped, and
+never treats an absent/null `outcome` as `0.0` (that would fabricate a
+"perfect" outcome and corrupt the Spearman correlation). Labeling
+unlabeled rows is a separate `label` command (roadmap, issue #108), out
+of scope for this capability.
+
 ## Package architecture
 
 ```
