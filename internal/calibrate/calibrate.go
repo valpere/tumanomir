@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -250,6 +251,176 @@ func AppendRow(path string, r RowToWrite) error {
 func hashSpec(specContent []byte) string {
 	hash := sha256.Sum256(specContent)
 	return hex.EncodeToString(hash[:])
+}
+
+// SetOutcome is the sole writer of a corpus row's outcome field
+// (REQ-MSR-09): no `measure` flag ever computes or guesses outcome, since
+// it's a human judgment about downstream consequences no tool can observe
+// at measurement time. It resolves hashPrefix against every row's
+// spec_hash (rows with no spec_hash — the pre-#107 hand-built schema —
+// can never match, since there is nothing to prefix-match against),
+// disambiguates rows sharing one full spec_hash under different
+// instruments via the optional instrument filter, then rewrites path
+// atomically with exactly that one row's outcome set.
+//
+// Resolution rules, checked in this order (git's abbreviated-SHA UX
+// precedent):
+//  1. zero matches -> error naming hashPrefix
+//  2. matches spanning >1 distinct full spec_hash values -> a genuine
+//     prefix collision, reported first even if instrument ambiguity is
+//     also present, since a longer prefix is the only fix for either case
+//  3. matches sharing one full spec_hash but >1 instrument -> ambiguous
+//     without instrument; the caller must pass --instrument
+//  4. exactly one match (after any instrument filtering) -> set outcome
+func SetOutcome(path, hashPrefix, instrument string, score float64) error {
+	// math.IsNaN/IsInf checked explicitly: NaN compares false against
+	// both < 0 and > 1, so the range check alone would let it through
+	// (fix-review, deepseek-v4-flash:cloud + kimi-k2.6:cloud).
+	if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
+		return fmt.Errorf("outcome score %v out of range [0,1]", score)
+	}
+
+	lines, parsed, err := scanCorpusLines(path)
+	if err != nil {
+		return err
+	}
+
+	var matches []int
+	for i, row := range parsed {
+		if row != nil && row.SpecHash != nil && strings.HasPrefix(*row.SpecHash, hashPrefix) {
+			matches = append(matches, i)
+		}
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("no corpus row found matching hash prefix %q in %s", hashPrefix, path)
+	}
+
+	hashes := map[string]bool{}
+	for _, i := range matches {
+		hashes[*parsed[i].SpecHash] = true
+	}
+	if len(hashes) > 1 {
+		return fmt.Errorf("hash prefix %q matches %d rows spanning %d distinct spec_hash values in %s — pass a longer prefix", hashPrefix, len(matches), len(hashes), path)
+	}
+
+	if len(matches) > 1 {
+		if instrument == "" {
+			var b strings.Builder
+			fmt.Fprintf(&b, "hash prefix %q matches %d rows sharing spec_hash %s under different instruments — pass --instrument to disambiguate:\n", hashPrefix, len(matches), *parsed[matches[0]].SpecHash)
+			for _, i := range matches {
+				fmt.Fprintf(&b, "  %s  instrument=%s\n", *parsed[i].SpecHash, parsed[i].Instrument)
+			}
+			return errors.New(b.String())
+		}
+		var filtered []int
+		for _, i := range matches {
+			if parsed[i].Instrument == instrument {
+				filtered = append(filtered, i)
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("no row matching hash prefix %q and instrument %q in %s", hashPrefix, instrument, path)
+		}
+		matches = filtered
+	}
+
+	idx := matches[0]
+	parsed[idx].Outcome = &score
+	updated, err := json.Marshal(parsed[idx])
+	if err != nil {
+		return fmt.Errorf("encode updated row: %w", err)
+	}
+	lines[idx] = updated
+
+	return atomicRewriteLines(path, lines)
+}
+
+// scanCorpusLines reads every line of path, returning both the raw
+// original bytes (unmodified, for round-tripping every row this label
+// invocation doesn't touch — including rows LoadCorpus itself would
+// reject as malformed) and a best-effort corpusRow parse of each line
+// (nil where the line is blank or fails to unmarshal). Index i of lines
+// and parsed always refer to the same on-disk line.
+func scanCorpusLines(path string) (lines [][]byte, parsed []*corpusRow, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for sc.Scan() {
+		line := append([]byte(nil), sc.Bytes()...) // Scanner reuses its buffer; must copy to keep past the next Scan
+		lines = append(lines, line)
+
+		var row corpusRow
+		if len(bytes.TrimSpace(line)) == 0 || json.Unmarshal(line, &row) != nil {
+			parsed = append(parsed, nil)
+			continue
+		}
+		parsed = append(parsed, &row)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, nil, err
+	}
+	return lines, parsed, nil
+}
+
+// atomicRewriteLines writes lines (one per JSONL row, newline-terminated)
+// to a temp file in path's directory, then os.Rename over path — so a
+// crash or write failure mid-rewrite leaves the original corpus file
+// completely untouched rather than truncated (label's atomicity
+// requirement, REQ-MSR-09). Not safe for concurrent callers writing the
+// same path — v0.1 has no file locking, the same single-user-CLI stance
+// AppendRow already documents.
+func atomicRewriteLines(path string, lines [][]byte) error {
+	// os.CreateTemp always creates with mode 0600 regardless of the
+	// original file's permissions — match the original's mode (0644 for
+	// a fresh AppendRow-created corpus) so a label call doesn't silently
+	// tighten the corpus file's permissions on every rewrite (fix-review,
+	// glm-5.1:cloud; independently reproduced).
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".corpus-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file for atomic rewrite: %w", err)
+	}
+	tmpPath := tmp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set corpus rewrite temp file permissions: %w", err)
+	}
+
+	w := bufio.NewWriter(tmp)
+	for _, line := range lines {
+		if _, err := w.Write(append(line, '\n')); err != nil {
+			_ = tmp.Close()
+			return fmt.Errorf("write corpus rewrite: %w", err)
+		}
+	}
+	if err := w.Flush(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("flush corpus rewrite: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close corpus rewrite temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename corpus rewrite into place: %w", err)
+	}
+	renamed = true
+	return nil
 }
 
 // InstrumentConfigString renders a full internal.InstrumentConfig as a

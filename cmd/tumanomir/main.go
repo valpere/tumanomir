@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/valpere/tumanomir/internal"
@@ -46,6 +47,11 @@ Usage:
                                            correlation + median split);
                                            informs, never auto-sets, a
                                            threshold — no LLM involved
+  tumanomir label <hash-or-prefix> <score>  set outcome on a corpus row
+                                           written by measure --corpus
+                                           (the sole writer of outcome —
+                                           no flag ever computes or
+                                           guesses it)
   tumanomir version
 
 Flags for check, measure, and gate:
@@ -95,6 +101,19 @@ valid rows is exit code 2. calibrate never writes to .tumanomir.yaml or
 proposes a single threshold — its output is meant to inform a human
 choice, not replace one.
 
+label sets outcome (a caller-defined float in [0,1]) on one row of the
+configured corpus file (.tumanomir.yaml's corpus.path, same file
+measure --corpus writes to), resolved by spec_hash prefix — like git's
+abbreviated SHAs. Zero matches is an error naming the prefix; a prefix
+spanning >1 distinct spec_hash values asks for a longer prefix; matches
+sharing one spec_hash under >1 instrument (the same spec measured under
+different instrument configs) ask for --instrument to disambiguate.
+The rewrite is atomic (temp file + rename); every other row round-trips
+byte-for-byte unchanged.
+
+  --instrument  string  disambiguate rows sharing one spec_hash across
+                         instruments (only needed when ambiguous)
+
 Flag precedence: CLI flag > .tumanomir.yaml > built-in default. See
 .tumanomir.yaml's schema in docs/requirements.md (REQ-CFG-02/03).
 
@@ -127,6 +146,8 @@ func dispatch(args []string) int {
 		return runGate(args[1:])
 	case "calibrate":
 		return runCalibrate(args[1:])
+	case "label":
+		return runLabel(args[1:])
 	case "version":
 		fmt.Println("tumanomir", version)
 		return 0
@@ -935,4 +956,50 @@ func renderCalibration(r calibrate.CalibrationResult, skipped, unlabeled int) {
 		fmt.Printf("  outcome >  median:  min=%.2f mean=%.2f max=%.2f\n\n", m.HighHalf.Min, m.HighHalf.Mean, m.HighHalf.Max)
 	}
 	fmt.Println("No threshold is auto-selected or written to .tumanomir.yaml — use these numbers to inform your own choice (REQ-NFR-03).")
+}
+
+// runLabel implements the `label` subcommand (REQ-MSR-09): the sole
+// writer of a corpus row's outcome field. Takes two required positional
+// args (a spec_hash prefix and a [0,1] score) plus an optional
+// --instrument disambiguation filter — not an instrument-selection flag
+// the way measure/gate's --instrument is, so it needs none of
+// validateMeasureFlags' backend:model parsing. Operates on the
+// .tumanomir.yaml-configured corpus path (config.Config.CorpusPath,
+// same file measure --corpus writes to) regardless of whether
+// corpus.enabled is set — label is a manual scoring action, independent
+// of measure's opt-in accretion switch.
+func runLabel(args []string) int {
+	fileCfg, ok := resolveConfig(args, "label")
+	if !ok {
+		return 2
+	}
+
+	fs := flag.NewFlagSet("label", flag.ExitOnError)
+	var (
+		configFlag     string
+		instrumentFlag string
+	)
+	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
+	fs.StringVar(&instrumentFlag, "instrument", "", "disambiguate rows sharing one spec_hash across instruments")
+	_ = fs.Parse(args)
+
+	if fs.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "label: exactly two arguments required: <hash-or-prefix> <score>")
+		return 2
+	}
+	hashPrefix := fs.Arg(0)
+	score, err := strconv.ParseFloat(fs.Arg(1), 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "label: <score> must be a float in [0,1], got %q: %v\n", fs.Arg(1), err)
+		return 2
+	}
+
+	corpusPath := fileCfg.CorpusPath()
+	if err := calibrate.SetOutcome(corpusPath, hashPrefix, instrumentFlag, score); err != nil {
+		fmt.Fprintln(os.Stderr, "label:", err)
+		return 2
+	}
+
+	fmt.Printf("label: set outcome=%.4g for hash prefix %q in %s\n", score, hashPrefix, corpusPath)
+	return 0
 }

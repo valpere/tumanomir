@@ -16,10 +16,11 @@ that argument is not re-made here.
 where an AI agent writes the implementation. It computes two independent
 metrics: deterministic (`K_drift`, `D_const` — no network, no LLM) and
 stochastic (`D_pair`, `H_norm` — generates N Go artifacts from your spec
-via Ollama and measures how far apart they land). Four commands: `check`
+via Ollama and measures how far apart they land). Five commands: `check`
 (deterministic layer), `measure` (stochastic layer), `gate` (both layers
-in one pass, for CI), and `calibrate` (correlating the metrics against a
-labeled historical corpus). All four are already implemented.
+in one pass, for CI), `calibrate` (correlating the metrics against a
+labeled historical corpus), and `label` (the sole writer of a corpus
+row's outcome). All five are already implemented.
 
 ## 2. Install & build
 
@@ -370,6 +371,69 @@ replacement for the human decision.
 `calibrate` doesn't accept `--format` — text output only, no JSON mode
 (REQ-OUT-03 covers only `check`/`measure`/`gate`).
 
+### 4.5. `label`
+
+`label` is the sole writer of a corpus row's `outcome` field
+(REQ-MSR-09) — no `measure` flag, and no other command, ever computes or
+guesses it: `outcome` is a human judgment about downstream consequences
+(rework, iteration count, review time) that no tool can observe directly
+at measurement time. It operates on the corpus file `.tumanomir.yaml`'s
+`corpus.path` names (§5) — the same file `measure --corpus` (§4.2)
+appends unlabeled rows to — regardless of whether `corpus.enabled` is
+set, since labeling is a manual action independent of that opt-in switch.
+
+```bash
+bin/tumanomir label a1b2c3d4 0.7
+```
+
+`<hash-or-prefix>` resolves against the corpus's `spec_hash` field,
+git-style (an abbreviated SHA, not a full one, is normally enough):
+
+- **zero matches** — an error naming the prefix searched.
+- **matches spanning more than one distinct full `spec_hash`** — a
+  genuine short-prefix collision; the error asks for a longer prefix.
+  Checked *before* the next case, since a longer prefix is the only fix
+  for either.
+- **matches sharing one full `spec_hash` under more than one
+  `instrument`** — this is legitimate, not a collision: the same spec
+  content measured under two different `InstrumentConfig`s is `measure
+  --corpus`'s dedup key, `(spec_hash, instrument)`, working as intended.
+  The error lists each match's full hash and instrument, asking for
+  `--instrument <string>` to disambiguate:
+
+```bash
+bin/tumanomir label a1b2c3d4 0.7
+```
+
+```
+label: hash prefix "a1b2c3d4" matches 2 rows sharing spec_hash a1b2c3d4... under different instruments — pass --instrument to disambiguate:
+  a1b2c3d4...  instrument=ollama:qwen3-coder:30b|temp=1.000000|n=10|think=false|ctx=8192|pred=2048|sim=0.950000
+  a1b2c3d4...  instrument=ollama:qwen3-coder:30b|temp=0.500000|n=10|think=false|ctx=8192|pred=2048|sim=0.950000
+```
+
+```bash
+bin/tumanomir label --instrument "ollama:qwen3-coder:30b|temp=1.000000|n=10|think=false|ctx=8192|pred=2048|sim=0.950000" a1b2c3d4 0.7
+```
+
+`--instrument` is purely a disambiguation filter here, not an
+instrument-selection flag the way `measure`/`gate`'s `--instrument` is —
+it's a no-op unless the corpus is actually ambiguous.
+
+`<score>` must parse as a float in `[0,1]`, the same range REQ-CAL-04
+already enforces on `outcome` — an out-of-range score is rejected at
+`label` time rather than silently written and later skipped by
+`calibrate`.
+
+The rewrite (every row read, only the matched one's `outcome` set, every
+row — including any malformed line `LoadCorpus` would itself skip —
+written back out unchanged) is atomic: a temp file in the corpus file's
+own directory, then renamed over the original, so a crash or write
+failure mid-rewrite never leaves a truncated corpus file. There is no
+file locking in v0.1 — running `measure --corpus` and `label` against
+the same file concurrently is last-writer-wins, the same single-user-CLI
+stance `measure --corpus`'s dedup already takes; not a concern for a
+single person's own workflow.
+
 ## 5. The `.tumanomir.yaml` config file
 
 `check`/`measure`/`gate` look for `./.tumanomir.yaml` (current working
@@ -526,9 +590,9 @@ for you — `spec_path`, `instrument`, and `d_pair` filled in, deduped on
 `(spec_hash, instrument)` so re-measuring an unchanged spec doesn't add
 duplicate rows. These rows have no `outcome` yet (`calibrate` reports
 them as "unlabeled," separate from valid/skipped) — step 3, labeling,
-is still a separate step; there is no `label` command in this version
-(tracked as a roadmap item, issue #108) — for now, label by hand-editing
-the corpus file's `outcome` field once the real outcome is known.
+is still a separate step: run `tumanomir label <hash-or-prefix> <score>`
+(§4.5) once the real outcome is known, rather than hand-editing the
+corpus file's `outcome` field.
 
 ## 8. Troubleshooting
 
@@ -548,6 +612,11 @@ while writing this guide), not a paraphrase.
 | `measure: exactly one <file.md> argument required` | `measure` called with zero or multiple arguments | pass exactly one spec file |
 | `gate: exactly one <file.md> argument required` | `gate` called with zero or multiple arguments (and never a directory) | pass exactly one spec file |
 | `calibrate: exactly one <corpus.jsonl> argument required` | `calibrate` called with zero or multiple arguments | pass exactly one JSONL corpus path |
+| `label: no corpus row found matching hash prefix "..." in ...` | `<hash-or-prefix>` matches zero rows | check the prefix against the corpus file, or run `measure --corpus` first |
+| `label: hash prefix "..." matches N rows spanning N distinct spec_hash values in ... — pass a longer prefix` | a genuine short-prefix collision (two different specs happen to share this prefix) | pass a longer hash prefix |
+| `label: hash prefix "..." matches N rows sharing spec_hash ... under different instruments — pass --instrument to disambiguate: ...` | the same spec measured under two `InstrumentConfig`s, both sharing one full `spec_hash` (legitimate — `(spec_hash, instrument)` is the dedup key) | pass `--instrument "<the exact instrument string from the list>"` |
+| `label: outcome score 1.4 out of range [0,1]` | `<score>` outside `[0,1]` | pass a score in `[0,1]` |
+| `label: exactly two arguments required: <hash-or-prefix> <score>` | `label` called with the wrong number of positional arguments | pass exactly `<hash-or-prefix> <score>` |
 
 ## 9. Where to go next
 

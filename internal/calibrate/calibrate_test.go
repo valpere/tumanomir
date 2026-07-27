@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -548,4 +549,225 @@ func loadCorpusForTest(t *testing.T, path string) int {
 		t.Fatalf("read corpus file: %v", err)
 	}
 	return bytes.Count(data, []byte("\n"))
+}
+
+// --- Part B: label / SetOutcome (issue #108) ---
+
+// TestSetOutcomeUpdatesMatchingRow: SetOutcome must set the matched row's
+// outcome and leave every other row byte-for-byte unchanged on disk —
+// the "zero data loss on rewrite" contract.
+func TestSetOutcomeUpdatesMatchingRow(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"aaaa1111"}`,
+		`{"spec_path":"b.md","instrument":"ollama:m","d_pair":0.2,"spec_hash":"bbbb2222"}`,
+		`{"spec_path":"c.md","instrument":"ollama:m","d_pair":0.3,"spec_hash":"cccc3333"}`,
+	}
+	path := writeCorpus(t, dir, lines)
+
+	if err := SetOutcome(path, "bbbb", "", 0.42); err != nil {
+		t.Fatalf("SetOutcome: %v", err)
+	}
+
+	got := readLines(t, path)
+	if got[0] != lines[0] || got[2] != lines[2] {
+		t.Fatalf("unmatched rows changed:\ngot[0]=%s\nwant=%s\ngot[2]=%s\nwant=%s", got[0], lines[0], got[2], lines[2])
+	}
+	var row corpusRow
+	if err := json.Unmarshal([]byte(got[1]), &row); err != nil {
+		t.Fatalf("unmarshal updated row: %v", err)
+	}
+	if row.Outcome == nil || *row.Outcome != 0.42 {
+		t.Fatalf("updated row outcome = %v, want 0.42", row.Outcome)
+	}
+	if row.SpecPath != "b.md" || row.DPair != 0.2 {
+		t.Fatalf("updated row lost other fields: %+v", row)
+	}
+}
+
+// TestSetOutcomePrefixCollisionErrors: two rows with distinct full
+// spec_hash values sharing one short prefix must error asking for a
+// longer prefix, not silently pick one (a real "abbreviated SHA is
+// ambiguous" collision, git's own UX precedent).
+func TestSetOutcomePrefixCollisionErrors(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`,
+		`{"spec_path":"b.md","instrument":"ollama:m","d_pair":0.2,"spec_hash":"abc222"}`,
+	}
+	path := writeCorpus(t, dir, lines)
+
+	err := SetOutcome(path, "abc", "", 0.5)
+	if err == nil {
+		t.Fatal("want an error for a hash prefix matching two distinct spec_hash values, got nil")
+	}
+	if !strings.Contains(err.Error(), "longer prefix") {
+		t.Fatalf("want the error to ask for a longer prefix, got: %v", err)
+	}
+}
+
+// TestSetOutcomeSameHashDifferentInstrumentsRequiresInstrumentFlag: two
+// rows sharing one full spec_hash (the same spec measured under two
+// instrument configs — REQ-MSR-08's dedup key is (spec_hash,
+// instrument), so this is legitimate, not a prefix collision) must error
+// asking for --instrument when omitted, and succeed once the correct
+// instrument is passed.
+func TestSetOutcomeSameHashDifferentInstrumentsRequiresInstrumentFlag(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{
+		`{"spec_path":"a.md","instrument":"ollama:m1","d_pair":0.1,"spec_hash":"deadbeef"}`,
+		`{"spec_path":"a.md","instrument":"ollama:m2","d_pair":0.2,"spec_hash":"deadbeef"}`,
+	}
+	path := writeCorpus(t, dir, lines)
+
+	err := SetOutcome(path, "deadbeef", "", 0.5)
+	if err == nil {
+		t.Fatal("want an error when the same full hash matches rows under different instruments, got nil")
+	}
+	if !strings.Contains(err.Error(), "--instrument") || !strings.Contains(err.Error(), "ollama:m1") || !strings.Contains(err.Error(), "ollama:m2") {
+		t.Fatalf("want the error to name --instrument and both instrument values, got: %v", err)
+	}
+
+	if err := SetOutcome(path, "deadbeef", "ollama:m2", 0.75); err != nil {
+		t.Fatalf("SetOutcome with disambiguating --instrument: %v", err)
+	}
+	got := readLines(t, path)
+	var row0, row1 corpusRow
+	if err := json.Unmarshal([]byte(got[0]), &row0); err != nil {
+		t.Fatalf("unmarshal row 0: %v", err)
+	}
+	if err := json.Unmarshal([]byte(got[1]), &row1); err != nil {
+		t.Fatalf("unmarshal row 1: %v", err)
+	}
+	if row0.Outcome != nil {
+		t.Fatalf("row 0 (ollama:m1) outcome = %v, want nil (untouched)", row0.Outcome)
+	}
+	if row1.Outcome == nil || *row1.Outcome != 0.75 {
+		t.Fatalf("row 1 (ollama:m2) outcome = %v, want 0.75", row1.Outcome)
+	}
+}
+
+// TestSetOutcomeNoMatchErrors: a hash prefix matching zero rows must
+// error naming the prefix searched.
+func TestSetOutcomeNoMatchErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := writeCorpus(t, dir, []string{
+		`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`,
+	})
+
+	err := SetOutcome(path, "nomatch", "", 0.5)
+	if err == nil {
+		t.Fatal("want an error for a hash prefix matching zero rows, got nil")
+	}
+	if !strings.Contains(err.Error(), "nomatch") {
+		t.Fatalf("want the error to name the searched prefix, got: %v", err)
+	}
+}
+
+// TestSetOutcomeRejectsOutOfRangeScore: a score outside [0,1] must be
+// rejected before any file I/O, matching REQ-CAL-04's outcome-range rule
+// — writing an invalid value would just be silently skipped by
+// calibrate later, which is worse than failing loudly now.
+func TestSetOutcomeRejectsOutOfRangeScore(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`}
+	path := writeCorpus(t, dir, lines)
+
+	for _, score := range []float64{-0.1, 1.1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if err := SetOutcome(path, "abc111", "", score); err == nil {
+			t.Fatalf("score=%v: want an error for an out-of-range outcome, got nil", score)
+		}
+	}
+	got := readLines(t, path)
+	if got[0] != lines[0] {
+		t.Fatalf("file changed despite rejected score: got %s, want %s", got[0], lines[0])
+	}
+}
+
+// TestSetOutcomeAcceptsBoundaryScores: 0.0 and 1.0 are the inclusive
+// edges of the [0,1] range and must be accepted, not rejected by an
+// off-by-one comparison direction (fix-review, glm-5.1:cloud +
+// kimi-k2.6:cloud).
+func TestSetOutcomeAcceptsBoundaryScores(t *testing.T) {
+	for _, score := range []float64{0.0, 1.0} {
+		dir := t.TempDir()
+		path := writeCorpus(t, dir, []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`})
+		if err := SetOutcome(path, "abc111", "", score); err != nil {
+			t.Fatalf("score=%v: want no error for a boundary outcome, got: %v", score, err)
+		}
+		var row corpusRow
+		if err := json.Unmarshal([]byte(readLines(t, path)[0]), &row); err != nil {
+			t.Fatalf("score=%v: unmarshal updated row: %v", score, err)
+		}
+		if row.Outcome == nil || *row.Outcome != score {
+			t.Fatalf("score=%v: row.Outcome = %v, want %v", score, row.Outcome, score)
+		}
+	}
+}
+
+// TestAtomicRewriteLinesPreservesPermissions: os.CreateTemp always
+// creates with mode 0600, regardless of the original file's mode — the
+// rewrite must not silently tighten the corpus file's permissions on
+// every label call (fix-review, glm-5.1:cloud; independently
+// reproduced: os.CreateTemp's default mode really is 0600).
+func TestAtomicRewriteLinesPreservesPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := writeCorpus(t, dir, []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`})
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	if err := SetOutcome(path, "abc111", "", 0.5); err != nil {
+		t.Fatalf("SetOutcome: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("mode after rewrite = %v, want 0644 (unchanged from before the rewrite)", info.Mode().Perm())
+	}
+}
+
+// TestSetOutcomeAtomicOnRewriteFailure: if the rewrite's temp-file
+// creation fails (simulated here by making the corpus directory
+// unwritable), the original corpus file must be left completely
+// untouched — never truncated or partially written.
+func TestSetOutcomeAtomicOnRewriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`}
+	path := writeCorpus(t, dir, lines)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus file: %v", err)
+	}
+
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) }) // restore so t.TempDir() cleanup can remove it
+
+	if err := SetOutcome(path, "abc111", "", 0.5); err == nil {
+		t.Fatal("want an error when the corpus directory is unwritable, got nil")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus file after failed rewrite: %v", err)
+	}
+	if !bytes.Equal(original, after) {
+		t.Fatalf("corpus file was modified despite a failed atomic rewrite:\nbefore: %s\nafter:  %s", original, after)
+	}
+}
+
+// readLines splits a JSONL file's content into its non-trailing-newline
+// lines, mirroring writeCorpus's own line-per-row convention.
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 }

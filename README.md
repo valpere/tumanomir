@@ -70,7 +70,9 @@ for the full flag list.
 `gate` runs both layers (or just the deterministic one, if no instrument
 resolves) in a single pass for CI, and `calibrate` correlates
 K_drift/D_const/D_pair against a labeled historical corpus of specs —
-neither auto-sets a threshold. An optional `.tumanomir.yaml` config file
+neither auto-sets a threshold. `label` is the sole writer of a corpus
+row's outcome, resolved by `spec_hash` prefix — no other command ever
+computes or guesses it. An optional `.tumanomir.yaml` config file
 lets `check`/`measure`/`gate` read thresholds and instrument settings
 instead of repeating them as flags every time (CLI flag still wins). Add
 `--format json` to any of `check`/`measure`/`gate` for one compact JSON
@@ -90,7 +92,7 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 
 ## Status
 
-v0.1 shipped: `check`, `measure`, `gate`, and `calibrate` are all
+v0.1 shipped: `check`, `measure`, `gate`, `calibrate`, and `label` are all
 **implemented** and work end-to-end. See `docs/requirements.md` (written
 in tumanomir's own traceable markup — we eat our own dog food),
 `docs/architecture.md` for how it's built, `docs/user-guide.md` for how to

@@ -65,6 +65,9 @@ tumanomir calibrate <corpus.jsonl>      # correlate K_drift/D_const/D_pair
                                          # corpus (Spearman + median split);
                                          # informs, never auto-sets, a
                                          # threshold — no LLM involved
+tumanomir label <hash-or-prefix> <score>  # set outcome on a corpus row
+                                         # (the sole writer of outcome —
+                                         # see REQ-MSR-09)
 tumanomir version                       # print version and exit
 
 # check, measure, and gate
@@ -125,9 +128,26 @@ full InstrumentConfig (not just backend:model), so different instrument
 settings never silently collide under the same key. `calibrate`'s
 `LoadCorpus` counts unlabeled rows separately from valid and skipped, and
 never treats an absent/null `outcome` as `0.0` (that would fabricate a
-"perfect" outcome and corrupt the Spearman correlation). Labeling
-unlabeled rows is a separate `label` command (roadmap, issue #108), out
-of scope for this capability.
+"perfect" outcome and corrupt the Spearman correlation).
+
+Labeling an unlabeled row is `label`'s job alone (REQ-MSR-09, issue
+#108) — it is the only writer of `outcome` anywhere in the tool, since
+outcome is a human judgment about downstream consequences no tool can
+observe at measurement time. `tumanomir label <hash-or-prefix> <score>`
+resolves against the configured corpus's `spec_hash` field, git-style:
+zero matches names the prefix searched; a prefix spanning more than one
+distinct full `spec_hash` (a genuine collision) asks for a longer one —
+checked before the next case, since both need the same fix; matches
+sharing one full `spec_hash` under more than one `instrument` (the same
+spec measured under two instrument configs, `(spec_hash, instrument)`
+being the actual dedup key) ask for `--instrument` to disambiguate.
+`<score>` must be in `[0,1]`, same range REQ-CAL-04 enforces on
+`outcome`. The rewrite (every row read, only the matched one mutated,
+every row written back out) is atomic — temp file + `os.Rename` — and
+every untouched row, including malformed ones `LoadCorpus` would itself
+skip, round-trips byte-for-byte. No file locking in v0.1: concurrent
+`measure`/`label` runs against the same corpus are last-writer-wins, the
+same single-user-CLI stance `AppendRow` already takes.
 
 ## Package architecture
 

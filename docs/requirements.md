@@ -202,8 +202,8 @@ for exactly that reason.
     (malformed) rows, and must never treat an absent/null `outcome` as
     `0.0` (that would silently fabricate a "perfect" outcome and corrupt
     the Spearman correlation, REQ-CAL-03). Labeling an unlabeled row is
-    out of scope for this requirement — see the `label` command roadmap
-    item. Dedup key is `(spec_hash, instrument)`, where `instrument`
+    out of scope for this requirement — see REQ-MSR-09's `label` command.
+    Dedup key is `(spec_hash, instrument)`, where `instrument`
     encodes the full InstrumentConfig (not just backend:model) — REQ-MSR-04's
     instrument-relative invariant means two measurements at different
     settings must never collide under the same key. Corpus-append
@@ -216,9 +216,47 @@ for exactly that reason.
        internal/calibrate.InstrumentConfigString; runMeasureImpl's
        post-generation corpus-append hook in cmd/tumanomir/main.go
 
+15. [REQ-MSR-09] `label` is the sole writer of a corpus row's `outcome`
+    field: no `measure` flag, and no other command, may compute or guess
+    `outcome` — it is a human judgment about downstream consequences
+    (rework, iteration count, review time) that no tool can observe
+    directly at measurement time (same exclusion REQ-MSR-08 already
+    states for the auto-appended row). `tumanomir label <hash-or-prefix>
+    <score>` resolves against the configured corpus file's `spec_hash`
+    field (git's abbreviated-SHA UX precedent): zero matches is an error
+    naming the prefix searched; matches spanning more than one distinct
+    full `spec_hash` value (a genuine short-prefix collision) is an error
+    asking for a longer prefix — checked and reported *before* the
+    instrument-ambiguity case below, since both need the same fix; matches
+    sharing one full `spec_hash` across more than one `instrument` value
+    (REQ-MSR-08's dedup key is `(spec_hash, instrument)`, so the same spec
+    content measured under two instrument configs deliberately produces
+    two rows with an identical full hash) is an error listing each match's
+    full hash and instrument, asking for an optional `--instrument <string>`
+    flag to disambiguate — a filter, not an instrument-selection flag the
+    way `measure`/`gate`'s `--instrument` is. `<score>` must parse as a
+    float and satisfy the same `[0,1]` range REQ-CAL-04 already enforces on
+    `outcome`; an out-of-range score is rejected at `label` time rather
+    than silently accepted and later skipped by `calibrate`. The rewrite
+    (read every row, mutate only the matched one's `outcome`, write every
+    row back out) must be atomic — a temp file in the corpus file's own
+    directory, then `os.Rename` over the original — so a crash or write
+    failure mid-rewrite never leaves a truncated or partially-written
+    corpus file; every row the rewrite doesn't touch, including a
+    malformed/unparseable line `LoadCorpus` itself would skip, must
+    round-trip byte-for-byte unchanged, never dropped. Concurrent
+    `measure`/`label` invocations against the same corpus file are
+    explicitly **not** locked in v0.1 — last-writer-wins, the same
+    single-user-CLI stance REQ-MSR-08's `AppendRow` already takes; a real
+    file-locking scheme is future work if that assumption stops holding.
+    -> [FUN-MSR-09] internal/calibrate.SetOutcome(path, hashPrefix,
+       instrument string, score float64) error; internal/calibrate's
+       scanCorpusLines/atomicRewriteLines helpers; cmd/tumanomir's
+       runLabel(args []string) int
+
 ### 2.3 Output and gating
 
-15. [REQ-OUT-01] Human-readable TTY output: one line per gated metric
+16. [REQ-OUT-01] Human-readable TTY output: one line per gated metric
     with value, verdict (ok/warn/block/skipped) and the threshold it was
     judged against. Ordinal signals (H, H_norm) are printed without a
     verdict/threshold column, since they never gate (REQ-MSR-02).
@@ -231,11 +269,11 @@ for exactly that reason.
        rendering their own structurally different content standalone —
        RenderReport is additive, not a replacement.
 
-16. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
+17. [REQ-OUT-02] Exit codes: 0 = all gates pass, 1 = at least one gate
     failed, 2 = execution error. CI-composable by construction.
     -> [FUN-OUT-02] Report.exit_code
 
-17. [REQ-OUT-03] `check`, `measure`, and `gate` must accept a `--format
+18. [REQ-OUT-03] `check`, `measure`, and `gate` must accept a `--format
     text|json` flag (default `text`, current TTY behavior unchanged). In
     JSON mode, the command emits exactly one compact JSON object to
     stdout (`json.NewEncoder(os.Stdout).Encode`), nothing else — no
@@ -257,7 +295,7 @@ for exactly that reason.
        internal.Thresholds it was gated against) and the --format
        branches in runCheck/runMeasureImpl/runGateImpl
 
-18. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
+19. [REQ-CFG-01] Thresholds are overridable via CLI flags; defaults are
     the article's hypothesis values (0.20 / 0.35 / 0.30) and must be
     documented as uncalibrated starting points.
     -> [FUN-CFG-01] internal.DefaultThresholds(); flag wiring in cmd
@@ -280,7 +318,7 @@ for exactly that reason.
 
 ### 2.4 Configuration file (.tumanomir.yaml)
 
-19. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
+20. [REQ-CFG-02] `check`/`measure` (and later `gate`) must accept an
     optional `.tumanomir.yaml` config file so thresholds and instrument
     settings don't have to be repeated as CLI flags on every invocation.
     An explicit `--config <path>` is authoritative: the named file must
@@ -293,7 +331,7 @@ for exactly that reason.
     -> [FUN-CFG-02] internal/config.Config, internal/config.Load(path string)
        (internal/config.Config, error)
 
-20. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
+21. [REQ-CFG-03] Precedence is CLI flag > config file > built-in default.
     Each subcommand's config file is resolved before its `flag.FlagSet` is
     built, and the resolved value seeds each flag's own default — so
     `flag.Parse`'s ordinary override behavior gives CLI-flag-wins for
@@ -306,7 +344,7 @@ for exactly that reason.
 
 ### 2.5 Gate command (CI mode)
 
-21. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
+22. [REQ-GATE-01] `gate` must run the deterministic layer (K_drift,
     D_const) and, when an instrument is configured, the stochastic
     layer (D_pair, H_norm) in one process invocation over one spec
     file, producing one unified Report (@schema Report) and one exit
@@ -321,7 +359,7 @@ for exactly that reason.
     runMeasureImpl's directory check), extended to `gate` uniformly
     regardless of which mode it runs in.
 
-22. [REQ-GATE-02] `gate` must run in deterministic-only mode —
+23. [REQ-GATE-02] `gate` must run in deterministic-only mode —
     Report.measure left null — when no instrument is resolvable from
     CLI flags or `.tumanomir.yaml`'s `instrument:` section. If any
     measure-specific CLI flag (`--samples`/`-n`, `--temp`,
@@ -334,7 +372,7 @@ for exactly that reason.
     -> [FUN-GATE-02] cmd/tumanomir's runGate instrument-resolution and
        contradiction-check logic (fs.Visit over measure-specific flags)
 
-23. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
+24. [REQ-GATE-03] `gate`'s Report.verdict/exit_code must combine
     KDVerdict, DCVerdict, and (when the stochastic layer ran)
     DPairVerdict by worst-case precedence block > warn > skipped > ok
     over that full set. exit_code is 1 if and only if KDVerdict ==
@@ -345,7 +383,7 @@ for exactly that reason.
     -> [FUN-GATE-03] cmd/tumanomir's gateVerdict(kd, dc internal.Verdict,
        dpair *internal.Verdict) (internal.Verdict, int)
 
-24. [REQ-GATE-04] `gate` must accept a `--explain` bool flag that, on a
+25. [REQ-GATE-04] `gate` must accept a `--explain` bool flag that, on a
     non-zero exit in text mode (not `--format json`), prints to **stderr**
     a human-readable classification of which layer(s) failed and whether
     each failure is deterministic (K_drift) or stochastic (D_pair). The
@@ -366,7 +404,7 @@ for exactly that reason.
 
 ### 2.6 Calibrate command
 
-25. [REQ-CAL-01] `calibrate` must accept a single JSONL corpus file, one
+26. [REQ-CAL-01] `calibrate` must accept a single JSONL corpus file, one
     row per historical spec: `{"spec_path": "...", "instrument":
     "ollama:qwen3-coder:30b", "d_pair": 0.27, "outcome": 0.8}`. `spec_path`
     must point to the immutable spec version that produced the paired
@@ -382,7 +420,7 @@ for exactly that reason.
        (rows []Row, skipped int, err error), calibrate.AnalyzedRow,
        calibrate.BuildAnalyzedRows(rows []Row) ([]AnalyzedRow, error)
 
-26. [REQ-CAL-02] `instrument` is a required opaque identifier for the
+27. [REQ-CAL-02] `instrument` is a required opaque identifier for the
     `InstrumentConfig` that produced a row's `d_pair`. All rows in one
     `calibrate` run must share the same `instrument` value — mixing
     instruments would produce an authoritative-looking but
@@ -398,7 +436,7 @@ for exactly that reason.
        valid row naming a different Instrument returns an error
        immediately)
 
-27. [REQ-CAL-03] For each of K_drift.Value, D_const.Value, and D_pair,
+28. [REQ-CAL-03] For each of K_drift.Value, D_const.Value, and D_pair,
     `calibrate` must compute the Spearman rank correlation (not Pearson —
     `outcome`'s arbitrary, caller-defined scale means only a monotonic
     relationship is meaningful to test, and Spearman degrades correctly
@@ -416,7 +454,7 @@ for exactly that reason.
        split via medianSplit); cmd/tumanomir's renderCalibration prints
        the result with no threshold recommendation and no config write
 
-28. [REQ-CAL-04] A corpus row that fails to parse, has an unreadable
+29. [REQ-CAL-04] A corpus row that fails to parse, has an unreadable
     `spec_path`, or has `d_pair`/`outcome` outside `[0,1]` is skipped and
     counted — never silently dropped without a count, and never aborting
     the whole run (that treatment is reserved for REQ-CAL-02's
@@ -430,7 +468,7 @@ for exactly that reason.
        2); calibrate.MinRowsForCalibration,
        CalibrationResult.SmallSample
 
-29. [REQ-CAL-05] `calibrate` must never invoke an LLM or make a network
+30. [REQ-CAL-05] `calibrate` must never invoke an LLM or make a network
     call: `d_pair` comes pre-computed from the corpus, K_drift/D_const
     recompute via the existing zero-network `internal/metrics` functions,
     and the correlation math is pure arithmetic. This is the same
@@ -443,7 +481,7 @@ for exactly that reason.
 
 ## 3. Non-functional requirements
 
-30. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
+31. [REQ-NFR-01] `check` on a 1 MB spec corpus must complete in under
     100 ms.
     -> [PHY-NFR-01] BenchmarkKDrift1MB, BenchmarkDConst1MB,
        BenchmarkCheck1MB in internal/metrics/benchmark_test.go. Verified
@@ -466,7 +504,7 @@ for exactly that reason.
        TestDConstAllocationBudget fail if either metric's allocation
        count regresses off its allocation-flat baseline.
 
-31. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
+32. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
     (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
@@ -474,7 +512,7 @@ for exactly that reason.
     -> [PHY-NFR-02] go.mod with exactly one external require:
        gopkg.in/yaml.v3
 
-32. [REQ-NFR-03] Methodology invariants must not be silently changed:
+33. [REQ-NFR-03] Methodology invariants must not be silently changed:
     D_pair is the working metric, H is ordinal; thresholds are
     hypotheses; instrument config is part of every result. Changes here
     require updating this document first.
