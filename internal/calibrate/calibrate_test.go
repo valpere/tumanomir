@@ -2,6 +2,8 @@ package calibrate
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/rand"
@@ -332,6 +334,32 @@ func TestAppendRowCreatesNewFile(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte(`"spec_path":`)) {
 		t.Errorf("file does not contain spec_path: %s", data)
+	}
+	wantHash := sha256.Sum256(specContent)
+	if !bytes.Contains(data, []byte(hex.EncodeToString(wantHash[:]))) {
+		t.Errorf("file's spec_hash does not match sha256(specContent) = %x: %s", wantHash, data)
+	}
+}
+
+// TestAppendRowCreatesMissingParentDir: the default corpus path
+// (.tumanomir/corpus.jsonl) has a parent directory that won't exist on
+// a project's first --enabled measure run — AppendRow must create it
+// rather than failing with ENOENT (fix-review, glm-5.1:cloud).
+func TestAppendRowCreatesMissingParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".tumanomir", "corpus.jsonl")
+	specPath := writeSpec(t, dir, "spec.md")
+
+	if err := AppendRow(path, RowToWrite{
+		SpecContent: []byte("package x\n"),
+		SpecPath:    specPath,
+		Instrument:  "ollama:m|temp=1.0|n=10|think=false|ctx=8192|pred=2048|sim=0.95",
+		DPair:       0.1,
+	}); err != nil {
+		t.Fatalf("AppendRow: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("corpus file not created: %v", err)
 	}
 }
 

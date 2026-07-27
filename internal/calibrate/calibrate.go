@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -149,13 +150,45 @@ type RowToWrite struct {
 	DPair       float64
 }
 
+// appendRowDuplicate scans path (if it exists) for an existing row
+// matching (hash, instrument) — the (spec_hash, instrument) dedup key.
+// Its own function boundary (rather than an inline block inside
+// AppendRow) matters: the read handle's defer must fire before
+// AppendRow goes on to open the same path for writing, not linger open
+// until AppendRow itself returns.
+func appendRowDuplicate(path, hash, instrument string) (bool, error) {
+	existing, err := os.Open(path)
+	if err != nil {
+		return false, nil // no corpus file yet — nothing to dedup against
+	}
+	defer func() { _ = existing.Close() }()
+
+	sc := bufio.NewScanner(existing)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for sc.Scan() {
+		var row corpusRow
+		if err := json.Unmarshal(sc.Bytes(), &row); err != nil {
+			continue
+		}
+		if row.SpecHash != nil && *row.SpecHash == hash && row.Instrument == instrument {
+			return true, nil
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return false, fmt.Errorf("scan %s for dedup: %w", path, err)
+	}
+	return false, nil
+}
+
 // AppendRow writes one row to the corpus file at path, with Outcome left
 // nil (an "unlabeled" row — the auto-accretion model is that outcome is
 // filled in later by a separate process, not at measure time). Dedup
 // rule: if a row with the same (SpecHash, Instrument) already exists in
 // the file, the append is skipped — re-running measure on an unchanged
 // spec under the same instrument is idempotent with respect to the
-// corpus.
+// corpus. Creates path's parent directory if missing (the default
+// corpus path, ".tumanomir/corpus.jsonl", would otherwise fail on a
+// project's very first --enabled measure run).
 //
 // Schema-ownership: this writer lives in internal/calibrate (same
 // package as LoadCorpus) so the on-disk row schema has exactly one
@@ -166,24 +199,27 @@ type RowToWrite struct {
 // exact content that produced this DPair, even if spec_path later
 // changes on disk).
 //
+// Not safe for concurrent callers writing the same path — v0.1 has no
+// file locking, matching the project's single-user-CLI stance (no
+// process is expected to run `measure --corpus` concurrently with
+// another against the same corpus file).
+//
 // Network-free: this function uses only os/os.Create/io, no net/*.
 // internal/nonetwork_test.go's guard set is unaffected.
 func AppendRow(path string, r RowToWrite) error {
 	hash := hashSpec(r.SpecContent)
 
-	if existing, err := os.Open(path); err == nil {
-		defer func() { _ = existing.Close() }()
-		sc := bufio.NewScanner(existing)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for sc.Scan() {
-			var existingRow corpusRow
-			if err := json.Unmarshal(sc.Bytes(), &existingRow); err != nil {
-				continue
-			}
-			if existingRow.SpecHash != nil && *existingRow.SpecHash == hash &&
-				existingRow.Instrument == r.Instrument {
-				return nil // already there, idempotent
-			}
+	dup, err := appendRowDuplicate(path, hash, r.Instrument)
+	if err != nil {
+		return err
+	}
+	if dup {
+		return nil // already there, idempotent
+	}
+
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create corpus directory %s: %w", dir, err)
 		}
 	}
 
