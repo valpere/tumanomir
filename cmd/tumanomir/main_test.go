@@ -2237,3 +2237,212 @@ func TestCalibrateLoadCorpusCorpusFlowIntegration(t *testing.T) {
 		t.Fatalf("rows=%d skipped=%d unlabeled=%d, want 0/0/1", len(rows), skipped, unlabeled)
 	}
 }
+
+// --- Part B: `label` subcommand (issue #108) ---
+
+// specHashFromCorpus extracts the first row's spec_hash from path — the
+// tests below need a real hash (measure --corpus's sha256 of spec
+// content), not a fabricated one, to exercise runLabel's resolution
+// logic against exactly what AppendRow actually writes. All rows written
+// for the same spec content share the same spec_hash (that's the whole
+// point of a content hash), so "first row" is enough even when multiple
+// instrument-distinct rows exist.
+func specHashFromCorpus(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read corpus: %v", err)
+	}
+	firstLine, _, _ := bytes.Cut(bytes.TrimSpace(data), []byte("\n"))
+	var row struct {
+		SpecHash string `json:"spec_hash"`
+	}
+	if err := json.Unmarshal(firstLine, &row); err != nil {
+		t.Fatalf("unmarshal corpus row: %v", err)
+	}
+	if row.SpecHash == "" {
+		t.Fatalf("corpus row has no spec_hash: %s", data)
+	}
+	return row.SpecHash
+}
+
+// TestRunLabelSetsOutcome: labeling a row AppendRow wrote (unlabeled)
+// must set its outcome and exit 0, resolved by a short hash prefix.
+func TestRunLabelSetsOutcome(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	if err := calibrate.AppendRow(corpusPath, calibrate.RowToWrite{
+		SpecContent: []byte("[REQ-X-01] x\n"),
+		SpecPath:    specPath,
+		Instrument:  "ollama:m|temp=1.0|n=10|think=false|ctx=8192|pred=2048|sim=0.95",
+		DPair:       0.3,
+	}); err != nil {
+		t.Fatalf("AppendRow: %v", err)
+	}
+	hash := specHashFromCorpus(t, corpusPath)
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	out, code := captureStdout(t, func() int {
+		return runLabel([]string{"--config", configPath, hash[:8], "0.7"})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+
+	rows, _, unlabeled, err := calibrate.LoadCorpus(corpusPath)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	if unlabeled != 0 || len(rows) != 1 || rows[0].Outcome != 0.7 {
+		t.Fatalf("rows=%+v unlabeled=%d, want 1 labeled row with outcome=0.7", rows, unlabeled)
+	}
+}
+
+// TestRunLabelInstrumentDisambiguation: two rows sharing one full
+// spec_hash under different instruments (the same spec measured twice
+// under different InstrumentConfigs) must require --instrument, and
+// succeed once it's supplied.
+func TestRunLabelInstrumentDisambiguation(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	specContent := []byte("[REQ-X-01] x\n")
+	if err := os.WriteFile(specPath, specContent, 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	instA := "ollama:m|temp=1.0|n=10|think=false|ctx=8192|pred=2048|sim=0.95"
+	instB := "ollama:m|temp=0.5|n=10|think=false|ctx=8192|pred=2048|sim=0.95"
+	for _, inst := range []string{instA, instB} {
+		if err := calibrate.AppendRow(corpusPath, calibrate.RowToWrite{
+			SpecContent: specContent,
+			SpecPath:    specPath,
+			Instrument:  inst,
+			DPair:       0.3,
+		}); err != nil {
+			t.Fatalf("AppendRow(%s): %v", inst, err)
+		}
+	}
+	hash := specHashFromCorpus(t, corpusPath)
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	errOut, code := captureStderr(t, func() int {
+		return runLabel([]string{"--config", configPath, hash[:8], "0.5"})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2 (ambiguous without --instrument); stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "--instrument") {
+		t.Fatalf("want stderr to mention --instrument, got: %s", errOut)
+	}
+
+	out, code := captureStdout(t, func() int {
+		return runLabel([]string{"--config", configPath, "--instrument", instB, hash[:8], "0.5"})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 with disambiguating --instrument; output:\n%s", code, out)
+	}
+
+	// Parse each row directly rather than via LoadCorpus: these two rows
+	// deliberately share one spec_hash under different instruments, which
+	// is exactly the shape LoadCorpus's own REQ-MSR-04 baseline check
+	// aborts on — a corpus assertion tool this test doesn't need.
+	data, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("read corpus: %v", err)
+	}
+	var labeledCount int
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var row struct {
+			Instrument string   `json:"instrument"`
+			Outcome    *float64 `json:"outcome"`
+		}
+		if err := json.Unmarshal(line, &row); err != nil {
+			t.Fatalf("unmarshal row: %v", err)
+		}
+		if row.Outcome == nil {
+			continue
+		}
+		labeledCount++
+		if row.Instrument != instB {
+			t.Fatalf("labeled row instrument = %q, want %q (only instB should be labeled)", row.Instrument, instB)
+		}
+		if *row.Outcome != 0.5 {
+			t.Fatalf("labeled row outcome = %v, want 0.5", *row.Outcome)
+		}
+	}
+	if labeledCount != 1 {
+		t.Fatalf("labeledCount = %d, want exactly 1", labeledCount)
+	}
+}
+
+// TestRunLabelNoMatchErrors: a hash prefix matching zero corpus rows
+// must exit 2 with an actionable stderr message.
+func TestRunLabelNoMatchErrors(t *testing.T) {
+	dir := t.TempDir()
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	if err := os.WriteFile(corpusPath, []byte(`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	errOut, code := captureStderr(t, func() int {
+		return runLabel([]string{"--config", configPath, "nomatch", "0.5"})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "label:") || !strings.Contains(errOut, "nomatch") {
+		t.Fatalf("want an actionable label-prefixed stderr message naming the prefix, got: %s", errOut)
+	}
+}
+
+// TestRunLabelInvalidScoreErrors: a <score> that doesn't parse as a
+// float must exit 2 before any corpus file is touched.
+func TestRunLabelInvalidScoreErrors(t *testing.T) {
+	dir := t.TempDir()
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	original := []byte(`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}` + "\n")
+	if err := os.WriteFile(corpusPath, original, 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	errOut, code := captureStderr(t, func() int {
+		return runLabel([]string{"--config", configPath, "abc111", "not-a-number"})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "label:") {
+		t.Fatalf("want a label-prefixed stderr message, got: %s", errOut)
+	}
+	after, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("read corpus: %v", err)
+	}
+	if !bytes.Equal(original, after) {
+		t.Fatalf("corpus file was touched despite an invalid score")
+	}
+}
+
+// TestDispatchLabel confirms the `label` subcommand is wired into
+// dispatch, not just directly callable.
+func TestDispatchLabel(t *testing.T) {
+	dir := t.TempDir()
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	if err := os.WriteFile(corpusPath, []byte(`{"spec_path":"a.md","instrument":"ollama:m","d_pair":0.1,"spec_hash":"abc111"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	out, code := captureStdout(t, func() int {
+		return dispatch([]string{"label", "--config", configPath, "abc111", "0.5"})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+}
