@@ -169,7 +169,7 @@ type RowToWrite struct {
 // Network-free: this function uses only os/os.Create/io, no net/*.
 // internal/nonetwork_test.go's guard set is unaffected.
 func AppendRow(path string, r RowToWrite) error {
-	hash := HashSpec(r.SpecContent)
+	hash := hashSpec(r.SpecContent)
 
 	if existing, err := os.Open(path); err == nil {
 		defer func() { _ = existing.Close() }()
@@ -208,11 +208,10 @@ func AppendRow(path string, r RowToWrite) error {
 	return nil
 }
 
-// HashSpec returns the sha256 hex digest of specContent — exposed so
-// cmd/tumanomir/runMeasureImpl can compute it once and pass it to
-// AppendRow without leaking the hash-construction detail into the
-// main package.
-func HashSpec(specContent []byte) string {
+// hashSpec returns the sha256 hex digest of specContent — AppendRow's
+// dedup key component. Unexported: only AppendRow needs it, so
+// cmd/tumanomir never has to know the hash algorithm.
+func hashSpec(specContent []byte) string {
 	hash := sha256.Sum256(specContent)
 	return hex.EncodeToString(hash[:])
 }
@@ -312,7 +311,8 @@ func Analyze(rows []AnalyzedRow) CalibrationResult {
 
 // rank assigns 1-based average ranks to vs — Spearman's tie-handling
 // rule: equal values share the mean of the rank positions they
-// collectively occupy.
+// collectively occupy (e.g. two ties at positions 4 and 5 both get rank
+// 4.5).
 func rank(vs []float64) []float64 {
 	n := len(vs)
 	idx := make([]int, n)
@@ -327,7 +327,7 @@ func rank(vs []float64) []float64 {
 		for j+1 < n && vs[idx[j+1]] == vs[idx[i]] {
 			j++
 		}
-		avg := float64(i+j+2) / 2
+		avg := float64(i+j+2) / 2 // mean of 1-based positions i+1..j+1
 		for k := i; k <= j; k++ {
 			ranks[idx[k]] = avg
 		}
@@ -336,7 +336,9 @@ func rank(vs []float64) []float64 {
 	return ranks
 }
 
-// pearson computes the Pearson product-moment correlation coefficient.
+// pearson computes the Pearson product-moment correlation coefficient of
+// xs and ys. Returns 0 when either series has zero variance — correlation
+// is undefined there, not "perfectly correlated."
 func pearson(xs, ys []float64) float64 {
 	n := float64(len(xs))
 	var sx, sy, sxy, sxx, syy float64
@@ -354,7 +356,13 @@ func pearson(xs, ys []float64) float64 {
 	return (n*sxy - sx*sy) / den
 }
 
-// spearman computes Spearman's rank correlation coefficient.
+// spearman computes Spearman's rank correlation coefficient: the Pearson
+// correlation of xs/ys after rank-transforming each with average-rank tie
+// handling — the standard, simplest correct construction (REQ-CAL-03).
+// Deliberately not Pearson on the raw values: Outcome is an arbitrary
+// caller-defined scale, so only a monotonic relationship is meaningful to
+// test, and Spearman degrades correctly to the binary "clear vs. fog"
+// case via its tie handling.
 func spearman(xs, ys []float64) float64 {
 	if len(xs) < 2 {
 		return 0
@@ -362,7 +370,8 @@ func spearman(xs, ys []float64) float64 {
 	return pearson(rank(xs), rank(ys))
 }
 
-// median returns the median of vs.
+// median returns the median of vs (the average of the two middle
+// elements for an even-length slice), without mutating vs.
 func median(vs []float64) float64 {
 	if len(vs) == 0 {
 		return 0
@@ -378,7 +387,8 @@ func median(vs []float64) float64 {
 
 // medianSplit partitions metricVals by whether their paired outcome is
 // at/below or above the median outcome, and returns each half's
-// min/mean/max.
+// min/mean/max (REQ-CAL-03) — informational only, never used to
+// auto-select a threshold (REQ-NFR-03).
 func medianSplit(metricVals, outcomes []float64) (low, high Range) {
 	med := median(outcomes)
 	var lowVals, highVals []float64
@@ -392,7 +402,8 @@ func medianSplit(metricVals, outcomes []float64) (low, high Range) {
 	return rangeOf(lowVals), rangeOf(highVals)
 }
 
-// rangeOf returns vs's min/mean/max, or the zero Range if vs is empty.
+// rangeOf returns vs's min/mean/max, or the zero Range if vs is empty (a
+// degenerate median split where every row lands in one half).
 func rangeOf(vs []float64) Range {
 	if len(vs) == 0 {
 		return Range{}

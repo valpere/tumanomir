@@ -498,12 +498,12 @@ func TestInstrumentConfigStringDistinguishes(t *testing.T) {
 // TestHashSpecStable: same content → same hash (caller relies on this for
 // dedup correctness).
 func TestHashSpecStable(t *testing.T) {
-	a := HashSpec([]byte("package x\ntype T struct{}"))
-	b := HashSpec([]byte("package x\ntype T struct{}"))
+	a := hashSpec([]byte("package x\ntype T struct{}"))
+	b := hashSpec([]byte("package x\ntype T struct{}"))
 	if a != b {
 		t.Errorf("same content produced different hashes: %q vs %q", a, b)
 	}
-	if a == HashSpec([]byte("package y\n")) {
+	if a == hashSpec([]byte("package y\n")) {
 		t.Errorf("different content produced same hash %q", a)
 	}
 }
