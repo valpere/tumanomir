@@ -12,7 +12,22 @@ reviewers:
     round_2: { model: deepseek-v4-flash:cloud }
     round_3: { model: kimi-k2.6:cloud }
 
-  # Failover — Ollama local (confirmed installed locally, three different vendor families)
+  # Tier 2 — external agent CLIs (own free-tier subscriptions/logins,
+  # entirely independent of Ollama's quota). Tried in this order per round;
+  # first one that returns a non-empty result wins. This is a pool that
+  # backs itself up — any single tool's free tier can run dry, so having
+  # several matters more than picking "the best one". See lib/agents.sh
+  # for the adapters.
+  external_agents:
+    - { tool: cursor-agent, model: auto }
+    - { tool: omp }
+    - { tool: codex }
+    - { tool: opencode, model: "opencode/nemotron-3-ultra-free" }
+    - { tool: kilo }
+
+  # Tier 3 — Ollama local (повністю офлайн, без ключа). Last resort — slow
+  # on this machine, only reached if both cloud and every external agent
+  # above failed.
   ollama_local:
     round_1: { model: granite3.3:8b }
     round_2: { model: qwen2.5-coder:7b }
@@ -33,7 +48,9 @@ post_summary_to_pr: true
 telemetry_enabled: true
 telemetry_file: .claude/skills/fix-review/telemetry.jsonl
 
-# Pricing per 1M tokens (USD) — Ollama cloud/local are free.
+# Pricing per 1M tokens (USD) — Ollama cloud/local are free. External-agent
+# rows are keyed by tool name, not model — also free (own subscriptions),
+# listed for telemetry completeness.
 pricing:
   "glm-5.1:cloud":           { input: 0.00, output: 0.00 }
   "deepseek-v4-flash:cloud": { input: 0.00, output: 0.00 }
@@ -41,3 +58,8 @@ pricing:
   "granite3.3:8b":      { input: 0.00, output: 0.00 }
   "qwen2.5-coder:7b":   { input: 0.00, output: 0.00 }
   "gemma4:31b":         { input: 0.00, output: 0.00 }
+  "cursor-agent":       { input: 0.00, output: 0.00 }
+  "omp":                { input: 0.00, output: 0.00 }
+  "codex":              { input: 0.00, output: 0.00 }
+  "opencode":           { input: 0.00, output: 0.00 }
+  "kilo":               { input: 0.00, output: 0.00 }

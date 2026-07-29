@@ -1,6 +1,6 @@
 ---
 name: fix-review
-description: "tumanomir (valpere/tumanomir) multi-model PR review with parallel fan-out. Provider: Ollama cloud (glm-5.1, deepseek-v4-flash, kimi-k2.6) primary, Ollama local failover. Claude acts as Arbiter — confirms, escalates, or dismisses findings using vote count as confidence signal. Applies a single consolidated fix commit. Does NOT merge — /ship owns the merge. Usage: /fix-review [PR-number]"
+description: "tumanomir (valpere/tumanomir) multi-model PR review with parallel fan-out. Provider: Ollama cloud (glm-5.1, deepseek-v4-flash, kimi-k2.6) primary, external-agent CLIs (cursor-agent/omp/codex/opencode/kilo) tier-2 failover, Ollama local tier-3. Claude acts as Arbiter — confirms, escalates, or dismisses findings using vote count as confidence signal. Applies a single consolidated fix commit. Does NOT merge — /ship owns the merge. Usage: /fix-review [PR-number]"
 ---
 
 # Skill: /fix-review (parallel)
@@ -66,16 +66,21 @@ CONFIG=".claude/skills/fix-review/config.yaml"
 Read fields from `$CONFIG` via `yq` (or grep/awk fallback):
 - `provider` — `ollama` (the only supported value; anything else aborts)
 - `reviewers.ollama.round_{1,2,3}.model` — primary models (cloud)
+- `reviewers.external_agents` — list of `{tool, model}` maps; tier-2
+  failover (CLI tools wrapping external LLMs, e.g. `cursor-agent`,
+  `omp`, `codex`, `opencode`, `kilo`); tried in config order when the
+  cloud round errors, before `ollama_local` (see lib/agents.sh)
 - `reviewers.ollama_local.round_{1,2,3}.model` — local failover tier
 - `ollama_api_url`
 - `api_key_env` — not set in this project's config; defaults to `OLLAMA_API_KEY`
-- `post_summary_to_pr`, `telemetry_enabled`, `pricing.{model}.{input,output}`
+- `post_summary_to_pr`, `telemetry_enabled`, `pricing.{model,tool}.{input,output}`
 
 **Validate provider + load API key:**
 
 ```bash
 source .claude/skills/lib/env.sh
 source .claude/skills/lib/rest.sh
+source .claude/skills/lib/agents.sh  # external-agent CLI adapters (try_external_agents cascade)
 
 if [ "$PROVIDER" != "ollama" ]; then
   echo "ERROR: unsupported provider '$PROVIDER' in config.yaml — only 'ollama' is supported." >&2
@@ -139,15 +144,32 @@ read_ollama_models "ollama_local"
 LOCAL_TIER_EXISTS="no"
 [ -n "$M1" ] && [ -n "$M2" ] && [ -n "$M3" ] && LOCAL_TIER_EXISTS="yes"   # yes: granite3.3:8b, qwen2.5-coder:7b, gemma4:31b
 
-if ! probe_provider "$API_URL" "$API_KEY" "$MODEL_R2" 2>&1; then
-  if [ "$LOCAL_TIER_EXISTS" = "yes" ]; then
-    echo "⚠️  FAILOVER: Ollama cloud unavailable — using Ollama local"
-    ACTIVE_KEY=""; FAILOVER_TIER="ollama_local"; FAILOVER_REASON="cloud probe failed"
-    ACTIVE_MODELS=("$M1" "$M2" "$M3")
-    echo "⚠️  FAILOVER: using Ollama local (${ACTIVE_MODELS[*]})"
-  else
-    echo "⚠️  WARNING: Ollama cloud unavailable and no ollama_local tier configured — reviews will fail."
-    FAILOVER_TIER="cloud_unavailable"; FAILOVER_REASON="cloud probe failed, no failover tier"
+# Tier 2 — external agent CLIs (own free tiers, independent of Ollama
+# quota). Optional, like ollama_local — absent config key means this tier
+# is skipped and cloud failures fall straight to ollama_local, unchanged.
+EXTERNAL_AGENTS_EXIST="no"
+yq -e '.reviewers.external_agents' "$CONFIG" >/dev/null 2>&1 && EXTERNAL_AGENTS_EXIST="yes"
+
+# Probe the primary only in cloud mode (key present, not local-only). If the
+# probe fails, skip the doomed cloud call for every round (CLOUD_KNOWN_BAD)
+# and let run_round()'s cascade decide per round which failover tier actually
+# answers — external_agents (tier 2) tried before ollama_local (tier 3), same
+# order as a per-round transient failure. Only mark cloud_unavailable
+# immediately when NEITHER failover tier is configured at all, so the
+# mandatory Step 11 notice still fires (rather than silently producing a
+# 0-finding "clean" review).
+CLOUD_KNOWN_BAD="no"
+if [ -n "$API_KEY" ]; then
+  if ! probe_provider "$API_URL" "$API_KEY" "$MODEL_R2" 2>&1; then
+    if [ "$EXTERNAL_AGENTS_EXIST" = "yes" ] || [ "$LOCAL_TIER_EXISTS" = "yes" ]; then
+      echo "⚠️  FAILOVER: Ollama cloud unavailable — routing rounds through failover tiers"
+      CLOUD_KNOWN_BAD="yes"; FAILOVER_REASON="cloud probe failed"
+      # FAILOVER_TIER itself is decided per round in run_round()'s cascade
+      # and reconciled after `wait` — see below.
+    else
+      echo "⚠️  WARNING: Ollama cloud unavailable and no failover tier configured — reviews will fail."
+      FAILOVER_TIER="cloud_unavailable"; FAILOVER_REASON="cloud probe failed, no failover tier"
+    fi
   fi
 fi
 ```
@@ -305,7 +327,24 @@ run_round() {
     fi
   fi
 
-  if [ -n "$err" ] && [ "$FAILOVER_TIER" = "" ] && [ "$LOCAL_TIER_EXISTS" = "yes" ]; then
+  if [ -n "$err" ] && [ "$FAILOVER_TIER" != "cloud_unavailable" ] && [ "$EXTERNAL_AGENTS_EXIST" = "yes" ]; then
+    echo "warn: round ${n} error (${err}) — trying external_agents" >&2
+    local prompt_file; prompt_file=$(mktemp)
+    printf '%s\n\n%s' "$REVIEW_SYSTEM_MSG" "$PROMPT" > "$prompt_file"
+    if try_external_agents "$n" "$prompt_file" "$CONFIG" "$RUN_DIR"; then
+      rm -f "$prompt_file"
+      r_end=$(python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo $(($(date +%s) * 1000)))
+      # try_external_agents already wrote round_${n}.raw.json/.meta/.failover —
+      # only fix up the timing half of .meta (it wrote duration "0").
+      local winning_tool; winning_tool=$(head -1 "$RUN_DIR/round_${n}.meta")
+      printf '%s\n%s' "$winning_tool" "$((r_end - r_start))" > "$RUN_DIR/round_${n}.meta"
+      return 0
+    fi
+    rm -f "$prompt_file"
+    err="all external_agents failed"
+  fi
+
+  if [ -n "$err" ] && [ "$FAILOVER_TIER" != "cloud_unavailable" ] && [ "$LOCAL_TIER_EXISTS" = "yes" ]; then
     local local_model
     local_model=$(yq -r ".reviewers.ollama_local.round_${n}.model // \"\"" "$CONFIG" 2>/dev/null)
     echo "warn: round ${n} error (${err}) — trying Ollama local (${local_model})" >&2
@@ -328,7 +367,11 @@ run_round 2 "${ACTIVE_MODELS[1]}"
 run_round 3 "${ACTIVE_MODELS[2]}"
 
 if ls "$RUN_DIR"/round_*.failover >/dev/null 2>&1 && [ "$FAILOVER_TIER" = "" ]; then
-  FAILOVER_TIER="ollama_local"
+  if grep -l '^external_agents:' "$RUN_DIR"/round_*.failover >/dev/null 2>&1; then
+    FAILOVER_TIER="external_agents"
+  else
+    FAILOVER_TIER="ollama_local"
+  fi
   FAILOVER_REASON="per-round error mid-review (see round_*.failover)"
 fi
 ```
@@ -561,7 +604,7 @@ Telemetry: ${TELEMETRY_FILE}
 **Failover reporting (mandatory):** if `FAILOVER_TIER` is non-empty, append a
 `### ⚠️ Provider failover` section — see the canonical library skill
 (`~/wrk/common/skills/fix-review/SKILL.md`) STEP 11 for the exact wording per
-failover kind (`ollama_local` vs `cloud_unavailable`).
+failover kind (`external_agents` vs `ollama_local` vs `cloud_unavailable`).
 
 ---
 
