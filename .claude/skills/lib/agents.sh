@@ -9,19 +9,15 @@
 #                                                     # reviewers.external_agents
 #                                                     # list from config.yaml
 #
-# Each of cursor-agent/omp/codex/opencode/kilo is invoked read-only
+# Each of cursor-agent/agy/omp/codex/opencode/kilo is invoked read-only
 # (no edits, no shell execution) and already unwraps its own tool-specific
 # output envelope, so callers get plain text back — the SAME code-fence-strip
 # + JSON-array-validate logic already used for Ollama responses (see
 # fix-review/SKILL.md STEP 4 parse_round()) works unchanged downstream.
 #
 # All prompt content is piped via stdin/file-ref, never a shell argument —
-# PR diffs can be large enough to risk ARG_MAX.
-#
-# `agy` was evaluated and dropped: even with the full review prompt (not
-# just a throwaway one-liner) it consistently explores the filesystem/
-# environment instead of answering directly, in both --mode plan and
-# unrestricted modes. Not a prompt-wording problem — verified 2026-07-29.
+# PR diffs can be large enough to risk ARG_MAX. Exception: agy (see its
+# adapter below) — its prompt MUST be a positional argument.
 
 # ---------------------------------------------------------------------------
 # Per-tool adapters — read-only invocation + envelope extraction, verified
@@ -33,6 +29,17 @@ agent_cursor_agent() {
   cursor-agent --print --output-format json --mode plan \
     ${model:+--model "$model"} < "$prompt_file" \
     | jq -r '.result // empty'
+}
+
+agent_agy() {
+  local model="$1" prompt_file="$2"
+  # Unlike every other adapter here, the prompt MUST be a positional
+  # argument, not stdin/file-ref — verified 2026-07-30. --prompt is an
+  # alias for the --print boolean flag, not a value-taking option; the
+  # actual prompt text goes after -p as a trailing positional argument.
+  agy -p "$(cat "$prompt_file")" --model "${model:-Gemini 3.5 Flash (Low)}" \
+    --mode plan --output-format json 2>/dev/null \
+    | jq -r '.response // empty'
 }
 
 agent_omp() {
@@ -79,6 +86,7 @@ run_external_agent() {
   local tool="$1" model="$2" prompt_file="$3"
   case "$tool" in
     cursor-agent) agent_cursor_agent "$model" "$prompt_file" ;;
+    agy)          agent_agy          "$model" "$prompt_file" ;;
     omp)          agent_omp          "$model" "$prompt_file" ;;
     codex)        agent_codex        "$model" "$prompt_file" ;;
     opencode)     agent_opencode     "$model" "$prompt_file" ;;
@@ -112,7 +120,11 @@ try_external_agents() {
     echo "warn: round ${n} trying external agent ${tool}${model:+ ($model)}" >&2
     out=$(run_external_agent "$tool" "$model" "$prompt_file" 2>/dev/null </dev/null)
     if [ -n "$(printf '%s' "$out" | tr -d '[:space:]')" ]; then
-      printf '%s' "$out" > "$run_dir/round_${n}.raw.json"
+      # Wrap in a standard Ollama envelope so parse_round()'s downstream
+      # `chat_content "ollama"` (which reads .message.content via jq) finds
+      # the content the same way it does for real Ollama REST responses.
+      # Without this the round would parse to 0 findings every time.
+      jq -nc --arg c "$out" '{message: {content: $c}}' > "$run_dir/round_${n}.raw.json"
       printf '%s\n0' "$tool" > "$run_dir/round_${n}.meta"
       printf 'external_agents:%s' "$tool" > "$run_dir/round_${n}.failover"
       return 0
