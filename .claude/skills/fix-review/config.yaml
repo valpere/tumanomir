@@ -20,6 +20,7 @@ reviewers:
   # for the adapters.
   external_agents:
     - { tool: cursor-agent, model: auto }
+    - { tool: agy, model: "Gemini 3.5 Flash (Low)" }
     - { tool: omp }
     - { tool: codex }
     - { tool: opencode, model: "opencode/nemotron-3-ultra-free" }
@@ -59,6 +60,7 @@ pricing:
   "qwen2.5-coder:7b":   { input: 0.00, output: 0.00 }
   "gemma4:31b":         { input: 0.00, output: 0.00 }
   "cursor-agent":       { input: 0.00, output: 0.00 }
+  "agy":                { input: 0.00, output: 0.00 }
   "omp":                { input: 0.00, output: 0.00 }
   "codex":              { input: 0.00, output: 0.00 }
   "opencode":           { input: 0.00, output: 0.00 }
