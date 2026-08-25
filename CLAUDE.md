@@ -72,6 +72,10 @@ make lint      # golangci-lint run (requires golangci-lint installed)
 make ci        # build + vet + test + lint + dogfood, all together
 ```
 
+`make ci` does not include `govulncheck` — that runs on a separate schedule
+(`.github/workflows/security.yml`, weekly cron + push/PR), not as part of
+the local Makefile surface.
+
 ## Conventions
 
 - Go >= 1.26, stdlib-only except gopkg.in/yaml.v3 for .tumanomir.yaml
