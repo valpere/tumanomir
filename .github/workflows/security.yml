@@ -1,0 +1,68 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, off-peak, off a round number to avoid shared-runner congestion.
+    # Runs against the default branch (main) automatically. GitHub disables
+    # scheduled workflows on public repos after 60 days with no repository
+    # activity — low risk here given the active PR/Dependabot cadence, but
+    # worth knowing if this job ever silently stops running.
+    - cron: '23 6 * * 2'
+
+jobs:
+  vulncheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # go run, not a go.mod `tool` directive — this project's CLAUDE.md
+      # documents "stdlib-only except gopkg.in/yaml.v3" as a convention;
+      # a dev-only vuln scanner is installed fresh here the same way
+      # golangci-lint is (see the lint job below), not vendored as a
+      # project dependency.
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  notify-failure:
+    needs: vulncheck
+    # Only for the `schedule` trigger: push/pull_request failures already
+    # surface via normal PR/branch-protection checks, but nobody actively
+    # watches a scheduled run the way they watch their own PR. Dedup via
+    # the automated-vulncheck-failure label so a persistently broken
+    # check files one issue, not one per week. Split into its own job (not
+    # a step in vulncheck) so `issues: write` is only ever granted here,
+    # never on push/pull_request runs of vulncheck.
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: File issue on scheduled failure
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create automated-vulncheck-failure --repo "${{ github.repository }}" --force \
+            --description "Filed automatically by the scheduled govulncheck job" \
+            --color d73a4a
+
+          open_count=$(gh issue list --repo "${{ github.repository }}" \
+            --label automated-vulncheck-failure --state open \
+            --json number --jq 'length') || open_count=0
+
+          if [ "${open_count:-0}" -eq 0 ]; then
+            run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            gh issue create --repo "${{ github.repository }}" \
+              --title "Scheduled govulncheck failed on $(date -u +%Y-%m-%d)" \
+              --label automated-vulncheck-failure \
+              --body "The weekly scheduled \`govulncheck\` run failed: ${run_url}"
+          fi
