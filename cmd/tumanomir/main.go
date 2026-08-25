@@ -28,7 +28,7 @@ const defaultConfigPath = ".tumanomir.yaml"
 
 // version is printed by the `version` subcommand and `-h`/`--help`/`help`.
 // Bump alongside any user-visible CLI or behavior change.
-const version = "0.1.0-dev"
+const version = "0.1.0"
 
 // usage is both the `-h`/`--help`/`help` output and the no-arguments error
 // message — a single source of truth for the CLI's documented surface so
