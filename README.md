@@ -93,11 +93,12 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 
 ## Status
 
-v0.1 shipped: `check`, `measure`, `gate`, `calibrate`, and `label` are all
-**implemented** and work end-to-end. See `docs/requirements.md` (written
-in tumanomir's own traceable markup — we eat our own dog food),
-`docs/architecture.md` for how it's built, `docs/user-guide.md` for how to
-use it, and `docs/roadmap.md` for what's not built yet.
+v0.1 shipped, tagged [`v0.1.0`](https://github.com/valpere/tumanomir/releases/tag/v0.1.0):
+`check`, `measure`, `gate`, `calibrate`, and `label` are all **implemented**
+and work end-to-end. See `docs/requirements.md` (written in tumanomir's own
+traceable markup — we eat our own dog food), `docs/architecture.md` for how
+it's built, `docs/user-guide.md` for how to use it, and `docs/roadmap.md`
+for what's not built yet.
 
 ## Limitations
 
@@ -116,6 +117,10 @@ unambiguous Go type definitions produced `H=0` in the source experiment) is
 instrument-dependent, not a universal floor guaranteed by the metric — a
 different or weaker model might not reach zero entropy even on a fully
 unambiguous spec.
+
+## Contributing
+
+Issues, bug reports, and pull requests are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
