@@ -7,6 +7,8 @@
 // internal/instrument needing to import each other.
 package internal
 
+import "time"
+
 // Verdict classifies a single metric's value against its threshold, and
 // doubles as the exit-code driver: cmd/tumanomir maps VerdictBlock to a
 // non-zero process exit, everything else to a clean run (see
@@ -160,6 +162,15 @@ type InstrumentConfig struct {
 	// print site — printing a literal would silently lie once a future
 	// PromptV2 lands and this field isn't updated alongside it.
 	PromptVersion string `json:"prompt_version"`
+	// Timeout bounds each HTTP request to the backend (REQ-MSR-10). Zero
+	// means the backend's own default applies (5 minutes for Ollama).
+	// Deliberately excluded from JSON/report output (json:"-") — unlike
+	// every other field here, Timeout has no effect on the generated
+	// output's statistical properties (it's a client-side wait limit, not
+	// part of what determines D_pair), so it isn't part of the
+	// instrument-relative reproducibility contract REQ-MSR-04 requires
+	// the rest of this struct to satisfy.
+	Timeout time.Duration `json:"-"`
 }
 
 // DispersionResult is the stochastic-layer output (D_pair, H/HNorm) for one

@@ -175,6 +175,22 @@ measure: generation failed: instrument: estimated prompt tokens (427, len(prompt
 similarity). `--sim-threshold` is the single-linkage clustering threshold
 for H/H_norm, default 0.95.
 
+`--timeout` bounds each individual HTTP request to the backend (default
+`5m`, Ollama's own default made explicit) — raise it for slow or
+CPU-bound local models, since one request timing out otherwise aborts the
+whole N-sample run rather than just that one sample (REQ-MSR-10):
+
+```bash
+bin/tumanomir measure --instrument ollama:qwen3-coder:30b \
+  --num-ctx 8192 --num-predict 2048 --timeout 15m \
+  docs/investigation/_sanity/specs/sharp.md
+```
+
+`--timeout` is deliberately absent from the `Instrument config` block
+above and from JSON output — unlike every other instrument setting, it's
+a client-side wait bound with no effect on generation, so it isn't part
+of what REQ-MSR-04 requires a report to reproduce.
+
 **The discard counter and the >40% warning (REQ-MSR-05).** Each sample
 gets up to 3 attempts (1 initial + 2 retries); if none produce valid Go,
 the sample is discarded — the count is never hidden. When the discarded
@@ -456,6 +472,7 @@ instrument:
   num_ctx: 8192          # int, must have headroom for prompt + num_predict
   num_predict: 2048       # int
   sim_threshold: 0.95     # float, [0,1]
+  timeout: 5m             # duration string; default 5m (REQ-MSR-10)
 corpus:
   enabled: false          # bool; off by default — measure never writes
                           # to disk unless you opt in (REQ-MSR-08)
@@ -605,6 +622,7 @@ while writing this guide), not a paraphrase.
 | `measure: unsupported backend "openai"; v0.1 supports only "ollama"` | a backend other than `ollama` | v0.1 only supports `ollama` (other instruments are on the roadmap) |
 | `measure: --num-ctx is required (must exceed the prompt token count)` | `--num-ctx` not passed (or `<= 0`) | add `--num-ctx <N>` with headroom over the prompt size |
 | `measure: generation failed: instrument: estimated prompt tokens (427, ...) + num_predict (2048) exceeds num_ctx (100); increase num_ctx or reduce num_predict` | the preflight check (REQ-MSR-06): prompt + `num_predict` don't fit `num_ctx` | raise `--num-ctx` or lower `--num-predict` |
+| `measure: generation failed: instrument: ollama request failed: ... context deadline exceeded ... (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)` | the request exceeded `--timeout` (default 5m, REQ-MSR-10) — slow/CPU-bound local model, or too large a `--num-ctx`/`--num-predict` | raise `--timeout` (e.g. `--timeout 15m`), lower `--num-ctx`/`--num-predict`, or use a faster instrument |
 | `check: --format must be "text" or "json", got "xml"` | `--format` with an unrecognized value | only `text` or `json` |
 | `gate: --temp was passed but no instrument resolved (...) — refusing to silently downgrade to deterministic-only (REQ-GATE-02)` | a measure-specific flag on `gate` with no instrument resolved | add `--instrument` (or drop that flag if you wanted a deterministic-only run) |
 | `calibrate: corpus mixes instruments "ollama:qwen3-coder:30b" and "ollama:glm-5.1:cloud" — all rows in one run must share the same instrument (REQ-MSR-04)` | a second, distinct `instrument` in the corpus | split the corpus by instrument — one `calibrate` run per instrument |

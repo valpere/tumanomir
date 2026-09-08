@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/valpere/tumanomir/internal"
 	"github.com/valpere/tumanomir/internal/calibrate"
@@ -451,7 +452,7 @@ func runMeasure(args []string) int {
 // Prints an actionable cmdName-prefixed stderr message and returns
 // ok=false on the first violation, mirroring resolveConfig's own
 // error-reporting convention.
-func validateMeasureFlags(cmdName, instrumentFlag string, samples int, simThreshold float64, numCtx, numPredict int) (backend, model string, ok bool) {
+func validateMeasureFlags(cmdName, instrumentFlag string, samples int, simThreshold float64, numCtx, numPredict int, timeout time.Duration) (backend, model string, ok bool) {
 	if instrumentFlag == "" {
 		fmt.Fprintf(os.Stderr, "%s: --instrument is required, format backend:model (e.g. ollama:qwen3-coder:30b)\n", cmdName)
 		return "", "", false
@@ -489,6 +490,10 @@ func validateMeasureFlags(cmdName, instrumentFlag string, samples int, simThresh
 		fmt.Fprintf(os.Stderr, "%s: --num-predict is required (must exceed the natural output length)\n", cmdName)
 		return "", "", false
 	}
+	if timeout <= 0 {
+		fmt.Fprintf(os.Stderr, "%s: --timeout must be a positive duration (e.g. 5m)\n", cmdName)
+		return "", "", false
+	}
 	return backend, model, true
 }
 
@@ -510,7 +515,11 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	// v0.1's built-in defaults — mirrors runCheck's th/ApplyThresholds
 	// seeding, but per-field rather than via a single struct pointer since
 	// these flags aren't backed by one InstrumentConfig variable.
-	seeded := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95})
+	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: 5 * time.Minute})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "measure:", err)
+		return 2
+	}
 	// The combined "backend:model" default is composed only when the
 	// config set BOTH parts — a config with only one of the two leaves
 	// this "" so the existing "--instrument is required" error still
@@ -535,6 +544,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		numCtx         int
 		numPredict     int
 		think          bool
+		timeout        time.Duration
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
@@ -547,13 +557,14 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.IntVar(&numPredict, "num-predict", seeded.NumPredict, "required: max generated tokens; must exceed natural output length")
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
+	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("measure", formatFlag) {
 		return 2
 	}
 
-	backend, model, ok := validateMeasureFlags("measure", instrumentFlag, samples, simThreshold, numCtx, numPredict)
+	backend, model, ok := validateMeasureFlags("measure", instrumentFlag, samples, simThreshold, numCtx, numPredict, timeout)
 	if !ok {
 		return 2
 	}
@@ -587,6 +598,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		NumCtx:        numCtx,
 		NumPredict:    numPredict,
 		SimThreshold:  simThreshold,
+		Timeout:       timeout,
 		Prompt:        instrument.PromptV1,
 		PromptVersion: instrument.PromptVersion,
 	}
@@ -748,6 +760,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 var gateMeasureFlagNames = map[string]bool{
 	"n": true, "samples": true, "temp": true, "sim-threshold": true,
 	"num-ctx": true, "num-predict": true, "think": true, "d-pair-max": true,
+	"timeout": true,
 }
 
 // runGate parses flags, validates the positional spec-file argument,
@@ -780,7 +793,11 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	// comment): a config with only one of backend/model leaves
 	// instrumentDefault "", so gate correctly treats it as unresolved
 	// rather than composing a malformed "ollama:" or ":my-model" default.
-	seeded := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95})
+	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: 5 * time.Minute})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gate:", err)
+		return 2
+	}
 	instrumentDefault := ""
 	if seeded.Backend != "" && seeded.Model != "" {
 		instrumentDefault = seeded.Backend + ":" + seeded.Model
@@ -799,6 +816,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 		numCtx         int
 		numPredict     int
 		think          bool
+		timeout        time.Duration
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
@@ -814,6 +832,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	fs.IntVar(&numPredict, "num-predict", seeded.NumPredict, "max generated tokens; must exceed natural output length")
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
+	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("gate", formatFlag) {
@@ -857,7 +876,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 
 	var mrPtr *report.MeasureResult
 	if instrumentFlag != "" {
-		backend, model, ok := validateMeasureFlags("gate", instrumentFlag, samples, simThreshold, numCtx, numPredict)
+		backend, model, ok := validateMeasureFlags("gate", instrumentFlag, samples, simThreshold, numCtx, numPredict, timeout)
 		if !ok {
 			return 2
 		}
@@ -871,6 +890,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 			NumCtx:        numCtx,
 			NumPredict:    numPredict,
 			SimThreshold:  simThreshold,
+			Timeout:       timeout,
 			Prompt:        instrument.PromptV1,
 			PromptVersion: instrument.PromptVersion,
 		}

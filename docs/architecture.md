@@ -93,6 +93,9 @@ tumanomir version                       # надрукувати версію і
 --num-predict    int     required: max generated tokens; must exceed natural output length
 --think          bool    enable reasoning-model think mode (default false)
 --d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
+--timeout        duration тайм-аут одного запиту до бекенда, напр. 10m
+                          (default 5m); збільшуйте для повільних/CPU-bound
+                          локальних моделей (REQ-MSR-10)
 
 # gate only
 --explain        bool    on non-zero exit, print which layer(s) failed and

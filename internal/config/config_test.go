@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valpere/tumanomir/internal"
 )
@@ -204,6 +205,11 @@ func TestInstrumentOr(t *testing.T) {
 			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.SimThreshold = 0.8 }),
 		},
 		{
+			name: "only Timeout set",
+			cfg:  Config{Instrument: &Instrument{Timeout: ptr("10m")}},
+			want: withInstrument(def, func(c *internal.InstrumentConfig) { c.Timeout = 10 * time.Minute }),
+		},
+		{
 			name: "all fields set, including explicit zero/false",
 			cfg: Config{Instrument: &Instrument{
 				Backend:      ptr("ollama"),
@@ -229,7 +235,10 @@ func TestInstrumentOr(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.cfg.InstrumentOr(def)
+			got, err := tt.cfg.InstrumentOr(def)
+			if err != nil {
+				t.Fatalf("InstrumentOr() error = %v, want nil", err)
+			}
 			if got != tt.want {
 				t.Fatalf("InstrumentOr() = %+v, want %+v", got, tt.want)
 			}
@@ -246,6 +255,18 @@ func TestInstrumentOr(t *testing.T) {
 func withInstrument(def internal.InstrumentConfig, mutate func(*internal.InstrumentConfig)) internal.InstrumentConfig {
 	mutate(&def)
 	return def
+}
+
+// TestInstrumentOrMalformedTimeout: unlike every other Instrument field,
+// Timeout is stored as a raw string (yaml.v3 has no native Duration
+// unmarshaling), so an invalid value isn't caught by Load's own
+// yaml.Unmarshal — it only surfaces here, as an error (REQ-MSR-10).
+func TestInstrumentOrMalformedTimeout(t *testing.T) {
+	cfg := Config{Instrument: &Instrument{Timeout: ptr("not-a-duration")}}
+	_, err := cfg.InstrumentOr(internal.InstrumentConfig{})
+	if err == nil {
+		t.Fatal("want an error for a malformed instrument.timeout value, got nil")
+	}
 }
 
 // --- Corpus: opt-in accretion config (issue #107) ---

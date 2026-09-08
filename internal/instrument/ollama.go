@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,9 +49,11 @@ type Ollama struct {
 }
 
 // NewOllama returns an Ollama backend for the given instrument
-// configuration, using the default BaseURL and HTTP client.
+// configuration, using the default BaseURL and HTTP client. config.Timeout
+// is threaded through to Timeout (REQ-MSR-10) — zero still means
+// defaultTimeout applies, via Ollama.timeout()'s own zero-value fallback.
 func NewOllama(config internal.InstrumentConfig) *Ollama {
-	return &Ollama{Config: config}
+	return &Ollama{Config: config, Timeout: config.Timeout}
 }
 
 // chatRequest is the /api/chat request payload. Stream is always false —
@@ -151,6 +154,13 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 
 	resp, err := o.httpClient().Do(httpReq)
 	if err != nil {
+		// http.Client.Timeout fires by cancelling the request's context,
+		// so a timed-out request's error wraps context.DeadlineExceeded —
+		// append an actionable hint rather than leaving the caller to
+		// guess what a bare "context deadline exceeded" means (issue #132).
+		if errors.Is(err, context.DeadlineExceeded) {
+			return Generation{}, fmt.Errorf("instrument: ollama request failed: %w (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)", err)
+		}
 		return Generation{}, fmt.Errorf("instrument: ollama request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
