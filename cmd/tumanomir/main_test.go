@@ -921,28 +921,34 @@ func TestRunMeasureImplTimeoutFlagOverride(t *testing.T) {
 	}
 }
 
-// TestRunMeasureImplRejectsNonPositiveTimeout: --timeout 0 (or negative)
+// TestRunMeasureImplRejectsNonPositiveTimeout: --timeout 0 or negative
 // must be rejected with a clear error, not silently accepted and later
-// misbehave as an instantly-expiring HTTP client.
+// misbehave as an instantly-expiring HTTP client. Both values share one
+// `<= 0` check in validateMeasureFlags (fix-review, glm-5.1:cloud noted
+// only "0s" was covered — negative added alongside it).
 func TestRunMeasureImplRejectsNonPositiveTimeout(t *testing.T) {
-	dir := t.TempDir()
-	specPath := filepath.Join(dir, "spec.md")
-	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
-		t.Fatalf("write temp spec: %v", err)
-	}
-	args := []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048", "--timeout", "0s", specPath}
+	for _, timeout := range []string{"0s", "-5m"} {
+		t.Run(timeout, func(t *testing.T) {
+			dir := t.TempDir()
+			specPath := filepath.Join(dir, "spec.md")
+			if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+				t.Fatalf("write temp spec: %v", err)
+			}
+			args := []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048", "--timeout", timeout, specPath}
 
-	errOut, code := captureStderr(t, func() int {
-		return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator {
-			t.Fatal("newGen must never be called for a rejected --timeout")
-			return nil
+			errOut, code := captureStderr(t, func() int {
+				return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+					t.Fatal("newGen must never be called for a rejected --timeout")
+					return nil
+				})
+			})
+			if code != 2 {
+				t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+			}
+			if !strings.Contains(errOut, "--timeout") {
+				t.Fatalf("want stderr to mention --timeout, got: %s", errOut)
+			}
 		})
-	})
-	if code != 2 {
-		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
-	}
-	if !strings.Contains(errOut, "--timeout") {
-		t.Fatalf("want stderr to mention --timeout, got: %s", errOut)
 	}
 }
 

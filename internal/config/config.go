@@ -144,7 +144,13 @@ func (c Config) InstrumentOr(def internal.InstrumentConfig) (internal.Instrument
 	if i.Timeout != nil {
 		d, err := time.ParseDuration(*i.Timeout)
 		if err != nil {
-			return internal.InstrumentConfig{}, fmt.Errorf("instrument.timeout: %w", err)
+			// Return def as merged so far (fix-review, kimi-k2.6:cloud) —
+			// every caller today treats a non-nil error as fatal and
+			// discards the returned config regardless, but a zero-value
+			// InstrumentConfig{} silently threw away every field already
+			// merged from earlier Instrument settings, which would bite a
+			// future caller that logs/uses the partial config on error.
+			return def, fmt.Errorf("instrument.timeout: %w", err)
 		}
 		def.Timeout = d
 	}

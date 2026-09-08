@@ -515,7 +515,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	// v0.1's built-in defaults — mirrors runCheck's th/ApplyThresholds
 	// seeding, but per-field rather than via a single struct pointer since
 	// these flags aren't backed by one InstrumentConfig variable.
-	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: 5 * time.Minute})
+	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: instrument.DefaultTimeout})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "measure:", err)
 		return 2
@@ -793,7 +793,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	// comment): a config with only one of backend/model leaves
 	// instrumentDefault "", so gate correctly treats it as unresolved
 	// rather than composing a malformed "ollama:" or ":my-model" default.
-	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: 5 * time.Minute})
+	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: instrument.DefaultTimeout})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gate:", err)
 		return 2

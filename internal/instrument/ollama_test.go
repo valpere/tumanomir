@@ -208,7 +208,7 @@ func TestNewOllamaDefaultsBaseURL(t *testing.T) {
 
 // TestNewOllamaThreadsConfigTimeout: config.Timeout must reach o.Timeout
 // (REQ-MSR-10) — before this, Ollama.Timeout was a real field NewOllama
-// simply never set, so it was always exactly defaultTimeout regardless
+// simply never set, so it was always exactly DefaultTimeout regardless
 // of what the caller configured (issue #132's root cause).
 func TestNewOllamaThreadsConfigTimeout(t *testing.T) {
 	cfg := baseConfig()
@@ -268,8 +268,8 @@ func TestOllamaGenerateTimeoutErrorIncludesHint(t *testing.T) {
 
 func TestOllamaTimeoutZeroFallsBackToDefault(t *testing.T) {
 	o := &Ollama{Config: baseConfig()}
-	if got := o.timeout(); got != defaultTimeout {
-		t.Fatalf("timeout() with zero-value Timeout = %v, want defaultTimeout (%v)", got, defaultTimeout)
+	if got := o.timeout(); got != DefaultTimeout {
+		t.Fatalf("timeout() with zero-value Timeout = %v, want DefaultTimeout (%v)", got, DefaultTimeout)
 	}
 }
 
