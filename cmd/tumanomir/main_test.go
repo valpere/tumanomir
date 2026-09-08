@@ -2586,6 +2586,85 @@ func TestParseWithTrailingFlagsUnknownFlagStillErrors(t *testing.T) {
 	}
 }
 
+// TestParseWithTrailingFlagsDanglingValueNotSwallowed: a value-taking
+// flag placed right before the positional, with its value genuinely
+// missing, must not silently absorb our own synthetic "--" sentinel as
+// a bogus value (fix-review, glm-5.1:cloud) — verified directly against
+// stdlib: flag.Parse takes whatever token comes next as a non-bool
+// flag's value unconditionally, even "--" itself, so inserting "--"
+// unconditionally after a dangling flag would corrupt it silently. The
+// exact error message differs from an unreordered fs.Parse's ("flag
+// needs an argument" vs this project's own "exactly one <file>
+// argument required"), but this must fail loudly either way — never
+// succeed with a bogus flag value.
+func TestParseWithTrailingFlagsDanglingValueNotSwallowed(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var name string
+	fs.StringVar(&name, "name", "default", "")
+
+	args := []string{"spec.md", "--name"}
+	_ = parseWithTrailingFlags(fs, args)
+	if name == "--" {
+		t.Fatalf("name = %q — our own synthetic \"--\" sentinel was silently swallowed as --name's value", name)
+	}
+}
+
+// TestRunMeasureImplFlagsAfterPositional: the exact repro from issue
+// #131 — measure's own documented invocation order in README
+// ("<file> --instrument ...") must actually parse every flag, not just
+// the ones before the positional. Mirrors TestRunMeasureImplFlagMapping
+// (flags before) but with every flag placed after.
+func TestRunMeasureImplFlagsAfterPositional(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	args := []string{
+		specPath,
+		"--instrument", "ollama:my-model",
+		"--temp", "0.7",
+		"--samples", "4",
+		"--think",
+		"--num-ctx", "4096",
+		"--num-predict", "512",
+		"--sim-threshold", "0.8",
+	}
+
+	var gotCfg internal.InstrumentConfig
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	_, code := captureStdout(t, func() int {
+		return runMeasureImpl(args, func(cfg internal.InstrumentConfig) instrument.Generator {
+			gotCfg = cfg
+			return gen
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	want := internal.InstrumentConfig{
+		Backend:      "ollama",
+		Model:        "my-model",
+		Temperature:  0.7,
+		Samples:      4,
+		Think:        true,
+		NumCtx:       4096,
+		NumPredict:   512,
+		SimThreshold: 0.8,
+	}
+	if gotCfg.Backend != want.Backend || gotCfg.Model != want.Model ||
+		gotCfg.Temperature != want.Temperature || gotCfg.Samples != want.Samples ||
+		gotCfg.Think != want.Think || gotCfg.NumCtx != want.NumCtx ||
+		gotCfg.NumPredict != want.NumPredict || gotCfg.SimThreshold != want.SimThreshold {
+		t.Fatalf("cfg = %+v, want fields matching %+v (all flags placed after the positional)", gotCfg, want)
+	}
+}
+
 // TestRunCheckImplFlagAfterPositional: the exact class of bug in issue
 // #131 — a flag placed after the file argument must actually take
 // effect, not silently fall back to its default.

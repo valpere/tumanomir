@@ -210,8 +210,20 @@ func scanConfigFlag(args []string) (path string, ok bool) {
 // flag.Parse's own end-of-flags convention).
 func parseWithTrailingFlags(fs *flag.FlagSet, args []string) error {
 	var flags, positional []string
+	// dangling tracks whether the last flag appended to `flags` needed a
+	// value but ran out of original args before getting one (fix-review,
+	// glm-5.1:cloud): flag.Parse always takes whatever token comes next
+	// as a non-bool flag's value, unconditionally — even one that looks
+	// like another flag, or our own synthetic "--" below (verified: it
+	// does not special-case this). So if we inserted "--" after a
+	// dangling flag, fs.Parse would silently swallow "--" as that
+	// flag's value instead of the real "flag needs an argument" error a
+	// plain fs.Parse(args) would give for the same input. Only insert
+	// "--" when it can't be mistaken for a value.
+	dangling := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		dangling = false
 		if a == "--" {
 			positional = append(positional, args[i+1:]...)
 			break
@@ -235,15 +247,18 @@ func parseWithTrailingFlags(fs *flag.FlagSet, args []string) error {
 		if i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
+		} else {
+			dangling = true
 		}
 	}
 	// "--" between the two halves, not a bare concatenation: fs.Parse
 	// re-scans this reordered slice from the start and would otherwise
 	// try to reinterpret a "-"-prefixed positional (e.g. a file literally
 	// named "-weird-file-name") as a flag again. "--" is flag.Parse's own
-	// documented end-of-flags marker — always safe to insert, since a
-	// normal (non-dash) positional just makes Parse stop there anyway.
-	if len(positional) > 0 {
+	// documented end-of-flags marker — safe to insert whenever `flags`
+	// doesn't end on a dangling flag (see above); a normal (non-dash)
+	// positional just makes Parse stop there anyway.
+	if len(positional) > 0 && !dangling {
 		flags = append(flags, "--")
 	}
 	return fs.Parse(append(flags, positional...))
