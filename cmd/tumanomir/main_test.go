@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -2481,5 +2482,204 @@ func TestDispatchLabel(t *testing.T) {
 	})
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+}
+
+// --- parseWithTrailingFlags: flags after the positional (issue #131) ---
+
+// TestParseWithTrailingFlagsHoistsFlagsAfterPositional is a focused unit
+// test on the reordering helper itself: flags placed after the
+// positional must still populate their target variables, exactly as if
+// they'd been placed before it.
+func TestParseWithTrailingFlagsHoistsFlagsAfterPositional(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	var name string
+	var count int
+	var verbose bool
+	fs.StringVar(&name, "name", "default", "")
+	fs.IntVar(&count, "count", 0, "")
+	fs.BoolVar(&verbose, "verbose", false, "")
+
+	args := []string{"spec.md", "--name", "hello", "--count", "5", "--verbose"}
+	if err := parseWithTrailingFlags(fs, args); err != nil {
+		t.Fatalf("parseWithTrailingFlags: %v", err)
+	}
+	if name != "hello" || count != 5 || !verbose {
+		t.Fatalf("name=%q count=%d verbose=%v, want hello/5/true", name, count, verbose)
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "spec.md" {
+		t.Fatalf("NArg=%d Arg(0)=%q, want 1/spec.md", fs.NArg(), fs.Arg(0))
+	}
+}
+
+// TestParseWithTrailingFlagsMixedBeforeAndAfter: flags may be split
+// across both sides of the positional — a partial migration, or a user
+// habit of putting some flags first — and all of them must still land.
+func TestParseWithTrailingFlagsMixedBeforeAndAfter(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	var name string
+	var count int
+	fs.StringVar(&name, "name", "default", "")
+	fs.IntVar(&count, "count", 0, "")
+
+	args := []string{"--name", "hello", "spec.md", "--count", "5"}
+	if err := parseWithTrailingFlags(fs, args); err != nil {
+		t.Fatalf("parseWithTrailingFlags: %v", err)
+	}
+	if name != "hello" || count != 5 {
+		t.Fatalf("name=%q count=%d, want hello/5", name, count)
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "spec.md" {
+		t.Fatalf("NArg=%d Arg(0)=%q, want 1/spec.md", fs.NArg(), fs.Arg(0))
+	}
+}
+
+// TestParseWithTrailingFlagsMultiplePositionals: label's <hash> <score>
+// shape — two positionals, both preserved in order, with a flag after both.
+func TestParseWithTrailingFlagsMultiplePositionals(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	var inst string
+	fs.StringVar(&inst, "instrument", "", "")
+
+	args := []string{"abc123", "0.5", "--instrument", "ollama:m"}
+	if err := parseWithTrailingFlags(fs, args); err != nil {
+		t.Fatalf("parseWithTrailingFlags: %v", err)
+	}
+	if inst != "ollama:m" {
+		t.Fatalf("inst=%q, want ollama:m", inst)
+	}
+	if fs.NArg() != 2 || fs.Arg(0) != "abc123" || fs.Arg(1) != "0.5" {
+		t.Fatalf("Args=%v, want [abc123 0.5]", fs.Args())
+	}
+}
+
+// TestParseWithTrailingFlagsDoubleDashSentinel: everything after a
+// literal "--" is positional, even if it looks like a flag, matching
+// flag.Parse's own end-of-flags convention.
+func TestParseWithTrailingFlagsDoubleDashSentinel(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	var name string
+	fs.StringVar(&name, "name", "default", "")
+
+	args := []string{"--name", "hello", "--", "-weird-file-name"}
+	if err := parseWithTrailingFlags(fs, args); err != nil {
+		t.Fatalf("parseWithTrailingFlags: %v", err)
+	}
+	if name != "hello" {
+		t.Fatalf("name=%q, want hello", name)
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "-weird-file-name" {
+		t.Fatalf("Args=%v, want [-weird-file-name]", fs.Args())
+	}
+}
+
+// TestParseWithTrailingFlagsUnknownFlagStillErrors: an unrecognized flag
+// must still produce flag.Parse's own error, not be silently swallowed
+// by the reordering pass.
+func TestParseWithTrailingFlagsUnknownFlagStillErrors(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	args := []string{"spec.md", "--bogus-flag"}
+	if err := parseWithTrailingFlags(fs, args); err == nil {
+		t.Fatal("want an error for an unrecognized flag, got nil")
+	}
+}
+
+// TestRunCheckImplFlagAfterPositional: the exact class of bug in issue
+// #131 — a flag placed after the file argument must actually take
+// effect, not silently fall back to its default.
+func TestRunCheckImplFlagAfterPositional(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int {
+		return runCheck([]string{specPath, "--k-drift-max", "0.99"})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "threshold 0.99") {
+		t.Fatalf("want output to reflect --k-drift-max 0.99 (placed after the positional), got:\n%s", out)
+	}
+}
+
+// TestRunGateImplFlagAfterPositional: a boolean flag (--explain) placed
+// after the positional, alongside a value flag, must both take effect.
+func TestRunGateImplFlagAfterPositional(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	out, code := captureStdout(t, func() int {
+		return runGateImpl([]string{specPath, "--k-drift-max", "0.99", "--explain"}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called in deterministic-only mode")
+			return nil
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "threshold 0.99") {
+		t.Fatalf("want output to reflect --k-drift-max 0.99 (placed after the positional), got:\n%s", out)
+	}
+}
+
+// TestRunLabelFlagAfterBothPositionals: label's two positionals followed
+// by --instrument must all be parsed correctly (the exact shape flagged
+// in issue #131's "Affected" list).
+func TestRunLabelFlagAfterBothPositionals(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	corpusPath := filepath.Join(dir, "corpus.jsonl")
+	row := fmt.Sprintf(`{"spec_path":%q,"instrument":"ollama:m1","d_pair":0.1,"spec_hash":"abc111"}`, specPath)
+	row2 := fmt.Sprintf(`{"spec_path":%q,"instrument":"ollama:m2","d_pair":0.2,"spec_hash":"abc111"}`, specPath)
+	if err := os.WriteFile(corpusPath, []byte(row+"\n"+row2+"\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+	configPath := writeMeasureConfig(t, dir, corpusPath)
+
+	_, code := captureStdout(t, func() int {
+		return runLabel([]string{"abc111", "0.7", "--config", configPath, "--instrument", "ollama:m2"})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 (both positionals + trailing --instrument must parse)", code)
+	}
+
+	// Parse each row directly rather than via LoadCorpus: these two rows
+	// deliberately share one spec_hash under different instruments, which
+	// is exactly the shape LoadCorpus's own REQ-MSR-04 baseline check
+	// aborts on — a corpus assertion tool this test doesn't need.
+	data, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("read corpus: %v", err)
+	}
+	var labeledCount int
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var row struct {
+			Instrument string   `json:"instrument"`
+			Outcome    *float64 `json:"outcome"`
+		}
+		if err := json.Unmarshal(line, &row); err != nil {
+			t.Fatalf("unmarshal row: %v", err)
+		}
+		if row.Outcome == nil {
+			continue
+		}
+		labeledCount++
+		if row.Instrument != "ollama:m2" || *row.Outcome != 0.7 {
+			t.Fatalf("labeled row = {instrument:%q outcome:%v}, want {ollama:m2 0.7}", row.Instrument, *row.Outcome)
+		}
+	}
+	if labeledCount != 1 {
+		t.Fatalf("labeledCount = %d, want exactly 1", labeledCount)
 	}
 }

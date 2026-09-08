@@ -189,6 +189,66 @@ func scanConfigFlag(args []string) (path string, ok bool) {
 	return "", false
 }
 
+// parseWithTrailingFlags parses args on fs, first reordering them so
+// every recognized flag (and its value, if it takes one) moves before
+// the command's positional argument(s) — plain fs.Parse stops at the
+// first non-flag token, so the documented invocation order
+// "<file> --instrument ..." silently dropped every flag placed after
+// the spec path (issue #131). Call this instead of fs.Parse(args)
+// directly in every subcommand that takes a positional; fs must already
+// have every flag registered (via the *Var calls) before this runs.
+//
+// Which flags consume a following token is looked up per-flag via
+// fs.Lookup + the same boolFlag interface (Value.(interface{
+// IsBoolFlag() bool })) the flag package's own Parse uses internally —
+// a bare "--explain" doesn't consume the next token, but "--instrument"
+// does, and this function needs to know the difference to reorder
+// correctly. Unrecognized flags are passed through as a single token
+// (no assumed value) so fs.Parse's own "flag provided but not defined"
+// error still fires exactly as before this reordering existed. Scanning
+// stops at a literal "--" (everything after is positional, per
+// flag.Parse's own end-of-flags convention).
+func parseWithTrailingFlags(fs *flag.FlagSet, args []string) error {
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		if strings.Contains(a, "=") {
+			continue // "--flag=value" is one token, already captured
+		}
+		name := strings.TrimLeft(a, "-")
+		fl := fs.Lookup(name)
+		if fl == nil {
+			continue // unknown flag — let fs.Parse report it itself
+		}
+		if bf, ok := fl.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+			continue // boolean flag: bare "--flag" doesn't consume a value
+		}
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	// "--" between the two halves, not a bare concatenation: fs.Parse
+	// re-scans this reordered slice from the start and would otherwise
+	// try to reinterpret a "-"-prefixed positional (e.g. a file literally
+	// named "-weird-file-name") as a flag again. "--" is flag.Parse's own
+	// documented end-of-flags marker — always safe to insert, since a
+	// normal (non-dash) positional just makes Parse stop there anyway.
+	if len(positional) > 0 {
+		flags = append(flags, "--")
+	}
+	return fs.Parse(append(flags, positional...))
+}
+
 // resolveConfig implements the --config discovery/precedence rule
 // (REQ-CFG-02): an explicit --config path is authoritative and must
 // exist/parse; otherwise ./.tumanomir.yaml (cwd only, no upward walk) is
@@ -269,7 +329,7 @@ func runCheck(args []string) int {
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
 	fs.Float64Var(&th.KDriftMax, "k-drift-max", th.KDriftMax, "max fraction of untraced requirements")
 	fs.Float64Var(&th.DConstMin, "d-const-min", th.DConstMin, "min lexical constraint density")
-	_ = fs.Parse(args)
+	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("check", formatFlag) {
 		return 2
@@ -472,7 +532,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.IntVar(&numPredict, "num-predict", seeded.NumPredict, "required: max generated tokens; must exceed natural output length")
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
-	_ = fs.Parse(args)
+	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("measure", formatFlag) {
 		return 2
@@ -739,7 +799,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	fs.IntVar(&numPredict, "num-predict", seeded.NumPredict, "max generated tokens; must exceed natural output length")
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
-	_ = fs.Parse(args)
+	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("gate", formatFlag) {
 		return 2
@@ -904,7 +964,7 @@ func gateVerdict(kd, dc internal.Verdict, dpair *internal.Verdict) (internal.Ver
 // it doesn't gate — and 2 on any load/argument error.
 func runCalibrate(args []string) int {
 	fs := flag.NewFlagSet("calibrate", flag.ExitOnError)
-	_ = fs.Parse(args)
+	_ = parseWithTrailingFlags(fs, args)
 
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "calibrate: exactly one <corpus.jsonl> argument required")
@@ -981,7 +1041,7 @@ func runLabel(args []string) int {
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&instrumentFlag, "instrument", "", "disambiguate rows sharing one spec_hash across instruments")
-	_ = fs.Parse(args)
+	_ = parseWithTrailingFlags(fs, args)
 
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "label: exactly two arguments required: <hash-or-prefix> <score>")
