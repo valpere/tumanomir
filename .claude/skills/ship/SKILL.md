@@ -157,6 +157,14 @@ Wait for completion. On error or no PR: print error, stop.
 
 Extract `PR_NUMBER`, `PR_URL`, `BRANCH_NAME`.
 
+**If implementing directly instead of delegating to `code-generator`**
+(e.g. a small/trivial fix): create the branch (`git checkout -b
+<type>-<slug>`) as the very first action, before any Edit/Write call —
+verify with `git branch --show-current` immediately after. The
+subagent's own prompt above bakes this step in for the delegated path;
+this is the equivalent guard for the direct path, where it's otherwise
+easy to start editing on `main` by mistake.
+
 Mark in-review:
 ```bash
 gh issue edit {ISSUE_NUMBER} --repo valpere/tumanomir \
