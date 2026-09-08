@@ -174,6 +174,22 @@ measure: generation failed: instrument: estimated prompt tokens (427, len(prompt
 `--sim-threshold` — поріг single-linkage кластеризації для H/H_norm,
 дефолт 0.95.
 
+`--timeout` обмежує кожен окремий HTTP-запит до бекенда (дефолт `5m`,
+власний дефолт Ollama, зроблений явним) — збільшуйте для повільних або
+CPU-bound локальних моделей: інакше тайм-аут одного запиту скасовує весь
+прогін з N семплів, а не тільки той семпл (REQ-MSR-10):
+
+```bash
+bin/tumanomir measure --instrument ollama:qwen3-coder:30b \
+  --num-ctx 8192 --num-predict 2048 --timeout 15m \
+  docs/investigation/_sanity/specs/sharp.md
+```
+
+`--timeout` навмисно відсутній у блоці `Instrument config` вище та в
+JSON-виводі — на відміну від інших налаштувань приладу, це клієнтська
+межа очікування без впливу на генерацію, тому вона не входить у те, що
+REQ-MSR-04 вимагає відтворювати зі звіту.
+
 **Лічильник discard і попередження >40% (REQ-MSR-05).** Кожен семпл
 намагається згенеруватись до 3 разів (1 спроба + 2 ретраї); якщо жодна
 спроба не дала валідного Go, семпл відкидається — лічильник ніколи не
@@ -454,6 +470,7 @@ instrument:
   num_ctx: 8192          # int, мусить мати запас під prompt + num_predict
   num_predict: 2048       # int
   sim_threshold: 0.95     # float, [0,1]
+  timeout: 5m             # duration-рядок; дефолт 5m (REQ-MSR-10)
 corpus:
   enabled: false          # bool; вимкнено за замовчуванням — measure
                           # ніколи не пише на диск без явної згоди
@@ -604,6 +621,7 @@ downstream-результат), якого на старті проєкту ще
 | `measure: unsupported backend "openai"; v0.1 supports only "ollama"` | backend, відмінний від `ollama` | v0.1 підтримує лише `ollama` (roadmap: інші прилади) |
 | `measure: --num-ctx is required (must exceed the prompt token count)` | не передано `--num-ctx` (або `<= 0`) | додайте `--num-ctx <N>` з запасом над розміром промпту |
 | `measure: generation failed: instrument: estimated prompt tokens (427, ...) + num_predict (2048) exceeds num_ctx (100); increase num_ctx or reduce num_predict` | preflight-перевірка (REQ-MSR-06): промпт + `num_predict` не влазять у `num_ctx` | збільшіть `--num-ctx` або зменшіть `--num-predict` |
+| `measure: generation failed: instrument: ollama request failed: ... context deadline exceeded ... (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)` | запит перевищив `--timeout` (дефолт 5m, REQ-MSR-10) — повільна/CPU-bound локальна модель, або завеликі `--num-ctx`/`--num-predict` | збільшіть `--timeout` (напр. `--timeout 15m`), зменшіть `--num-ctx`/`--num-predict`, або оберіть швидший прилад |
 | `check: --format must be "text" or "json", got "xml"` | `--format` з невідомим значенням | лише `text` або `json` |
 | `gate: --temp was passed but no instrument resolved (...) — refusing to silently downgrade to deterministic-only (REQ-GATE-02)` | measure-специфічний прапорець на `gate` без визначеного приладу | додайте `--instrument` (або приберіть цей прапорець, якщо хотіли лише детермінований прогін) |
 | `calibrate: corpus mixes instruments "ollama:qwen3-coder:30b" and "ollama:glm-5.1:cloud" — all rows in one run must share the same instrument (REQ-MSR-04)` | другий, відмінний `instrument` у корпусі | розділіть корпус по приладу — один прогін `calibrate` на один прилад |

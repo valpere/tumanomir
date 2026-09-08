@@ -10,6 +10,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/valpere/tumanomir/internal"
 	"gopkg.in/yaml.v3"
@@ -44,6 +45,12 @@ type Instrument struct {
 	NumCtx       *int     `yaml:"num_ctx"`
 	NumPredict   *int     `yaml:"num_predict"`
 	SimThreshold *float64 `yaml:"sim_threshold"`
+	// Timeout is a Go duration string (e.g. "10m"), not a typed
+	// time.Duration — yaml.v3 has no native Duration unmarshaling, so a
+	// malformed value parses fine as a string and only fails later in
+	// InstrumentOr, unlike the numeric fields above which yaml.v3 itself
+	// rejects at Load time for a non-numeric value.
+	Timeout *string `yaml:"timeout"`
 }
 
 // Corpus is the opt-in control for `measure`'s corpus-accretion behavior:
@@ -99,9 +106,15 @@ func (c Config) ApplyThresholds(th *internal.Thresholds) {
 // file's corresponding value when the config sets it. Prompt/PromptVersion
 // are never touched (deliberately non-configurable, REQ-MSR-04) — def's
 // values for those two fields pass through unchanged.
-func (c Config) InstrumentOr(def internal.InstrumentConfig) internal.InstrumentConfig {
+//
+// Timeout is the one field that can fail to parse (REQ-MSR-10): it's
+// stored as a raw string in the config file (see Instrument.Timeout), so
+// an invalid duration like "instrument.timeout: soon" isn't caught by
+// yaml.v3 at Load time the way a malformed numeric field would be — it
+// only surfaces here, as an error rather than a silently-ignored value.
+func (c Config) InstrumentOr(def internal.InstrumentConfig) (internal.InstrumentConfig, error) {
 	if c.Instrument == nil {
-		return def
+		return def, nil
 	}
 	i := c.Instrument
 	if i.Backend != nil {
@@ -128,7 +141,20 @@ func (c Config) InstrumentOr(def internal.InstrumentConfig) internal.InstrumentC
 	if i.SimThreshold != nil {
 		def.SimThreshold = *i.SimThreshold
 	}
-	return def
+	if i.Timeout != nil {
+		d, err := time.ParseDuration(*i.Timeout)
+		if err != nil {
+			// Return def as merged so far (fix-review, kimi-k2.6:cloud) —
+			// every caller today treats a non-nil error as fatal and
+			// discards the returned config regardless, but a zero-value
+			// InstrumentConfig{} silently threw away every field already
+			// merged from earlier Instrument settings, which would bite a
+			// future caller that logs/uses the partial config on error.
+			return def, fmt.Errorf("instrument.timeout: %w", err)
+		}
+		def.Timeout = d
+	}
+	return def, nil
 }
 
 // CorpusEnabled reports whether the user has opted in to corpus accretion

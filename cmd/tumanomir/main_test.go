@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valpere/tumanomir/internal"
 	"github.com/valpere/tumanomir/internal/calibrate"
@@ -855,6 +856,123 @@ func TestRunMeasureImplFlagMapping(t *testing.T) {
 	}
 	if gotCfg.Prompt == "" || gotCfg.PromptVersion == "" {
 		t.Fatalf("cfg.Prompt/PromptVersion left unset; got %+v", gotCfg)
+	}
+}
+
+// --- --timeout flag (issue #132) ---
+
+// TestRunMeasureImplTimeoutDefaultsToFiveMinutes: omitting --timeout must
+// still populate cfg.Timeout with the built-in 5-minute default, not
+// leave it zero (which internal/instrument.Ollama would also treat as
+// "use defaultTimeout," but the CLI's own default should be explicit and
+// visible via --help/--timeout's registered default, not merely
+// coincide with the backend's separate fallback).
+func TestRunMeasureImplTimeoutDefaultsToFiveMinutes(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048", specPath}
+
+	var gotCfg internal.InstrumentConfig
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	_, code := captureStdout(t, func() int {
+		return runMeasureImpl(args, func(cfg internal.InstrumentConfig) instrument.Generator {
+			gotCfg = cfg
+			return gen
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	if gotCfg.Timeout != 5*time.Minute {
+		t.Fatalf("cfg.Timeout = %v, want 5m (the built-in default)", gotCfg.Timeout)
+	}
+}
+
+// TestRunMeasureImplTimeoutFlagOverride: an explicit --timeout must
+// override the default and reach cfg.Timeout.
+func TestRunMeasureImplTimeoutFlagOverride(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+	args := []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048", "--timeout", "20m", specPath}
+
+	var gotCfg internal.InstrumentConfig
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return genOK(goBlock(testSrcFoo))
+	}}
+	_, code := captureStdout(t, func() int {
+		return runMeasureImpl(args, func(cfg internal.InstrumentConfig) instrument.Generator {
+			gotCfg = cfg
+			return gen
+		})
+	})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	if gotCfg.Timeout != 20*time.Minute {
+		t.Fatalf("cfg.Timeout = %v, want 20m", gotCfg.Timeout)
+	}
+}
+
+// TestRunMeasureImplRejectsNonPositiveTimeout: --timeout 0 or negative
+// must be rejected with a clear error, not silently accepted and later
+// misbehave as an instantly-expiring HTTP client. Both values share one
+// `<= 0` check in validateMeasureFlags (fix-review, glm-5.1:cloud noted
+// only "0s" was covered — negative added alongside it).
+func TestRunMeasureImplRejectsNonPositiveTimeout(t *testing.T) {
+	for _, timeout := range []string{"0s", "-5m"} {
+		t.Run(timeout, func(t *testing.T) {
+			dir := t.TempDir()
+			specPath := filepath.Join(dir, "spec.md")
+			if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n"), 0o644); err != nil {
+				t.Fatalf("write temp spec: %v", err)
+			}
+			args := []string{"--instrument", "ollama:m", "--num-ctx", "8192", "--num-predict", "2048", "--timeout", timeout, specPath}
+
+			errOut, code := captureStderr(t, func() int {
+				return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+					t.Fatal("newGen must never be called for a rejected --timeout")
+					return nil
+				})
+			})
+			if code != 2 {
+				t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+			}
+			if !strings.Contains(errOut, "--timeout") {
+				t.Fatalf("want stderr to mention --timeout, got: %s", errOut)
+			}
+		})
+	}
+}
+
+// TestRunGateImplTimeoutFlagRequiresInstrument: --timeout on a gate run
+// with no instrument resolved is a REQ-GATE-02 contradiction, same as
+// every other measure-specific flag.
+func TestRunGateImplTimeoutFlagRequiresInstrument(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(specPath, []byte("[REQ-X-01] x\n-> [FUN-X-01] y\n"), 0o644); err != nil {
+		t.Fatalf("write temp spec: %v", err)
+	}
+
+	errOut, code := captureStderr(t, func() int {
+		return runGateImpl([]string{specPath, "--timeout", "20m"}, func(internal.InstrumentConfig) instrument.Generator {
+			t.Fatal("newGen must never be called when no instrument resolved")
+			return nil
+		})
+	})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr:\n%s", code, errOut)
+	}
+	if !strings.Contains(errOut, "--timeout") || !strings.Contains(errOut, "REQ-GATE-02") {
+		t.Fatalf("want stderr to name --timeout and REQ-GATE-02, got: %s", errOut)
 	}
 }
 

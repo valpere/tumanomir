@@ -93,6 +93,9 @@ tumanomir version                       # print version and exit
 --num-predict    int     required: max generated tokens; must exceed natural output length
 --think          bool    enable reasoning-model think mode (default false)
 --d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
+--timeout        duration per-request timeout against the backend, e.g. 10m
+                          (default 5m); raise for slow/CPU-bound local models
+                          (REQ-MSR-10)
 
 # gate only
 --explain        bool    on non-zero exit, print which layer(s) failed and

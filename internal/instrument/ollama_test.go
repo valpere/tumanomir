@@ -206,6 +206,22 @@ func TestNewOllamaDefaultsBaseURL(t *testing.T) {
 	}
 }
 
+// TestNewOllamaThreadsConfigTimeout: config.Timeout must reach o.Timeout
+// (REQ-MSR-10) — before this, Ollama.Timeout was a real field NewOllama
+// simply never set, so it was always exactly DefaultTimeout regardless
+// of what the caller configured (issue #132's root cause).
+func TestNewOllamaThreadsConfigTimeout(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Timeout = 42 * time.Second
+	o := NewOllama(cfg)
+	if o.Timeout != 42*time.Second {
+		t.Fatalf("o.Timeout = %v, want 42s (from config.Timeout)", o.Timeout)
+	}
+	if got := o.timeout(); got != 42*time.Second {
+		t.Fatalf("o.timeout() = %v, want 42s", got)
+	}
+}
+
 func TestOllamaGenerateTimesOut(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
@@ -227,10 +243,33 @@ func TestOllamaGenerateTimesOut(t *testing.T) {
 	}
 }
 
+// TestOllamaGenerateTimeoutErrorIncludesHint: a deadline-exceeded error
+// must carry an actionable hint (issue #132, item 3) rather than leaving
+// the caller to guess what a bare "context deadline exceeded" means.
+func TestOllamaGenerateTimeoutErrorIncludesHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(chatResponse{
+			Message: chatMessage{Role: "assistant", Content: "package main"},
+			Done:    true,
+		})
+	}))
+	defer srv.Close()
+
+	o := &Ollama{BaseURL: srv.URL, Config: baseConfig(), Timeout: 50 * time.Millisecond}
+	_, err := o.Generate(t.Context(), "generate a Go file")
+	if err == nil {
+		t.Fatal("want timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--timeout") {
+		t.Fatalf("want the error to hint at raising --timeout, got: %v", err)
+	}
+}
+
 func TestOllamaTimeoutZeroFallsBackToDefault(t *testing.T) {
 	o := &Ollama{Config: baseConfig()}
-	if got := o.timeout(); got != defaultTimeout {
-		t.Fatalf("timeout() with zero-value Timeout = %v, want defaultTimeout (%v)", got, defaultTimeout)
+	if got := o.timeout(); got != DefaultTimeout {
+		t.Fatalf("timeout() with zero-value Timeout = %v, want DefaultTimeout (%v)", got, DefaultTimeout)
 	}
 }
 

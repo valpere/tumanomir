@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,16 +17,18 @@ import (
 // defaultBaseURL is used when Ollama.BaseURL is the zero value.
 const defaultBaseURL = "http://localhost:11434"
 
-// defaultTimeout is used when Ollama.Timeout is the zero value. It's a
+// DefaultTimeout is used when Ollama.Timeout is the zero value. It's a
 // generous safety bound against a truly hung connection, not a tight SLA —
-// local models on modest hardware can be slow.
-const defaultTimeout = 5 * time.Minute
+// local models on modest hardware can be slow. Exported (fix-review,
+// kimi-k2.6:cloud) so cmd/tumanomir's --timeout flag default doesn't
+// duplicate the literal in a second place that could drift from this one.
+const DefaultTimeout = 5 * time.Minute
 
 // Ollama is the v0.1 Generator backend, talking to Ollama's /api/chat
 // endpoint (stream:false, one complete JSON object per request).
 //
 // BaseURL defaults to defaultBaseURL ("http://localhost:11434") when empty.
-// HTTPClient defaults to a client with a defaultTimeout timeout when nil.
+// HTTPClient defaults to a client with a DefaultTimeout timeout when nil.
 // Use NewOllama for a constructed instance with Config set, or build the
 // struct directly and rely on the zero-value defaults for
 // BaseURL/HTTPClient/Timeout.
@@ -35,7 +38,7 @@ type Ollama struct {
 	BaseURL string
 
 	// Timeout bounds each HTTP request to Ollama's /api/chat. Zero means
-	// defaultTimeout (5 minutes) is used. Ignored if HTTPClient is set
+	// DefaultTimeout (5 minutes) is used. Ignored if HTTPClient is set
 	// explicitly — the caller owns that client's timeout behavior.
 	Timeout time.Duration
 
@@ -48,9 +51,11 @@ type Ollama struct {
 }
 
 // NewOllama returns an Ollama backend for the given instrument
-// configuration, using the default BaseURL and HTTP client.
+// configuration, using the default BaseURL and HTTP client. config.Timeout
+// is threaded through to Timeout (REQ-MSR-10) — zero still means
+// DefaultTimeout applies, via Ollama.timeout()'s own zero-value fallback.
 func NewOllama(config internal.InstrumentConfig) *Ollama {
-	return &Ollama{Config: config}
+	return &Ollama{Config: config, Timeout: config.Timeout}
 }
 
 // chatRequest is the /api/chat request payload. Stream is always false —
@@ -151,6 +156,13 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 
 	resp, err := o.httpClient().Do(httpReq)
 	if err != nil {
+		// http.Client.Timeout fires by cancelling the request's context,
+		// so a timed-out request's error wraps context.DeadlineExceeded —
+		// append an actionable hint rather than leaving the caller to
+		// guess what a bare "context deadline exceeded" means (issue #132).
+		if errors.Is(err, context.DeadlineExceeded) {
+			return Generation{}, fmt.Errorf("instrument: ollama request failed: %w (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)", err)
+		}
 		return Generation{}, fmt.Errorf("instrument: ollama request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -223,10 +235,10 @@ func (o *Ollama) httpClient() *http.Client {
 	return &http.Client{Timeout: o.timeout()}
 }
 
-// timeout returns o.Timeout if non-zero, else defaultTimeout.
+// timeout returns o.Timeout if non-zero, else DefaultTimeout.
 func (o *Ollama) timeout() time.Duration {
 	if o.Timeout != 0 {
 		return o.Timeout
 	}
-	return defaultTimeout
+	return DefaultTimeout
 }
