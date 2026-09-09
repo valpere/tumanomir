@@ -586,6 +586,43 @@ func TestRunMeasureWithGeneratorDiscardsAfterAllAttemptsTimeout(t *testing.T) {
 	}
 }
 
+// TestRunMeasureWithGeneratorMixesTimeoutAndInvalidGoRetries: a timeout
+// and an invalid-Go-parse attempt draw from the same maxAttemptsPerSample
+// budget when they occur in the same slot (fix-review, deepseek-v4-flash
+// + kimi-k2.6, 2/3 votes) — neither failure mode gets its own separate
+// retry allowance.
+func TestRunMeasureWithGeneratorMixesTimeoutAndInvalidGoRetries(t *testing.T) {
+	const invalidText = "no fenced go block here at all\n"
+
+	// slot 0 (calls 0-2): timeout, invalid Go, then valid on the 3rd
+	// (and final) attempt.
+	responses := []struct {
+		g   instrument.Generation
+		err error
+	}{
+		{err: errFakeTimeout},
+		{g: instrument.Generation{Text: []byte(invalidText)}},
+		{g: instrument.Generation{Text: goBlock(testSrcFoo)}},
+	}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return responses[call].g, responses[call].err
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 1, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v, want nil", err)
+	}
+	if gen.calls != len(responses) {
+		t.Fatalf("calls = %d, want %d", gen.calls, len(responses))
+	}
+	if mr.Dispersion.Discarded != 0 {
+		t.Fatalf("Discarded = %d, want 0 (the slot succeeded on its 3rd attempt); got %+v", mr.Dispersion.Discarded, mr)
+	}
+	if mr.Dispersion.N != 1 {
+		t.Fatalf("N = %d, want 1; got %+v", mr.Dispersion.N, mr)
+	}
+}
+
 func TestRunMeasureWithGeneratorErrorFailsFast(t *testing.T) {
 	wantErr := errFakeGenerate
 	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
