@@ -523,6 +523,69 @@ func TestRunMeasureWithGeneratorRetriesThenDiscards(t *testing.T) {
 	}
 }
 
+// errFakeTimeout mirrors the wrapped form internal/instrument/ollama.go
+// actually returns on a request timeout (issue #132/PR #135) — %w-wraps
+// context.DeadlineExceeded rather than being that sentinel value directly,
+// so this test exercises the same errors.Is unwrap path runMeasureWithGenerator
+// itself uses, not a shortcut that only works because the fake used the
+// bare sentinel.
+var errFakeTimeout = fmt.Errorf("fake generator: simulated timeout: %w", context.DeadlineExceeded)
+
+// TestRunMeasureWithGeneratorRetriesTimeoutThenSucceeds: a timeout on the
+// first attempt of a slot must not fail the whole run (issue #136) — the
+// slot retries within the existing maxAttemptsPerSample budget and still
+// counts as valid once an attempt succeeds.
+func TestRunMeasureWithGeneratorRetriesTimeoutThenSucceeds(t *testing.T) {
+	// slot 0 (call 0): valid immediately.
+	// slot 1 (calls 1-2): timeout, then valid on the 2nd attempt.
+	responses := []struct {
+		g   instrument.Generation
+		err error
+	}{
+		{g: instrument.Generation{Text: goBlock(testSrcFoo)}},
+		{err: errFakeTimeout},
+		{g: instrument.Generation{Text: goBlock(testSrcFoo)}},
+	}
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return responses[call].g, responses[call].err
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 2, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v, want nil (a timeout must retry, not fail the run)", err)
+	}
+	if gen.calls != len(responses) {
+		t.Fatalf("calls = %d, want %d", gen.calls, len(responses))
+	}
+	if mr.Dispersion.Discarded != 0 {
+		t.Fatalf("Discarded = %d, want 0 (the timed-out slot still succeeded on retry); got %+v", mr.Dispersion.Discarded, mr)
+	}
+	if mr.Dispersion.N != 2 {
+		t.Fatalf("N = %d, want 2; got %+v", mr.Dispersion.N, mr)
+	}
+}
+
+// TestRunMeasureWithGeneratorDiscardsAfterAllAttemptsTimeout: a slot whose
+// every attempt times out is discarded like any other exhausted-retries
+// slot (REQ-MSR-05) — never a hard failure of the whole run, and never
+// padded back up with an extra slot.
+func TestRunMeasureWithGeneratorDiscardsAfterAllAttemptsTimeout(t *testing.T) {
+	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {
+		return instrument.Generation{}, errFakeTimeout
+	}}
+
+	mr, err := runMeasureWithGenerator(gen, internal.InstrumentConfig{Backend: "ollama", Model: "test", SimThreshold: 0.95}, []byte("spec"), 1, testThresholds)
+	if err != nil {
+		t.Fatalf("runMeasureWithGenerator() error = %v, want nil (exhausted timeout retries is a discard, not a run failure)", err)
+	}
+	if gen.calls != maxAttemptsPerSample {
+		t.Fatalf("calls = %d, want %d (no padding beyond the retry budget)", gen.calls, maxAttemptsPerSample)
+	}
+	if mr.Dispersion.Discarded != 1 {
+		t.Fatalf("Discarded = %d, want 1; got %+v", mr.Dispersion.Discarded, mr)
+	}
+}
+
 func TestRunMeasureWithGeneratorErrorFailsFast(t *testing.T) {
 	wantErr := errFakeGenerate
 	gen := &fakeGenerator{fn: func(call int) (instrument.Generation, error) {

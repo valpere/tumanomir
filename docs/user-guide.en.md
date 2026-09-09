@@ -193,10 +193,15 @@ of what REQ-MSR-04 requires a report to reproduce.
 
 **The discard counter and the >40% warning (REQ-MSR-05).** Each sample
 gets up to 3 attempts (1 initial + 2 retries); if none produce valid Go,
-the sample is discarded — the count is never hidden. When the discarded
-fraction exceeds 40% (a hypothesis, not a calibrated constant — the same
-status as the 0.20/0.35/0.30 thresholds), the report prints a dedicated
-warning line above the metrics:
+the sample is discarded — the count is never hidden. A per-request
+`--timeout` on one attempt shares this same retry budget: it's retried
+like an invalid-Go attempt rather than aborting the whole run, and folds
+into the same discard count if every attempt for that sample times out
+(issue #136) — every other instrument error (a broken instrument, bad
+model name) still aborts the run immediately, unchanged. When the
+discarded fraction exceeds 40% (a hypothesis, not a calibrated constant —
+the same status as the 0.20/0.35/0.30 thresholds), the report prints a
+dedicated warning line above the metrics:
 
 ```
 ⚠ discard rate: 50% (2/4 generations invalid) — exceeds the 40% hypothesis threshold (REQ-MSR-05); results may be unreliable

@@ -155,6 +155,16 @@ for exactly that reason.
     signal only, not a new gate: it implies no exit-code change, consistent
     with D_pair/H_norm staying ordinal/advisory in v0.1.
 
+    A per-request timeout (REQ-MSR-10's `--timeout`) on one attempt is
+    treated as an invalid attempt for that sample slot, sharing this same
+    ≤2-retry budget and the same discard/invalid-rate accounting above —
+    never a distinct, untracked failure mode, and never a reason to abort
+    the whole run over a single slow sample. Every other instrument error
+    (a broken instrument, bad model name, connection refused) is still a
+    hard failure of the whole run, not a per-sample retry case — narrowing
+    this to timeouts specifically avoids masking a genuinely broken
+    instrument as ordinary discard noise.
+
 12. [REQ-MSR-06] For reasoning-capable models the instrument must set
     think=false; requests must set num_ctx and num_predict explicitly.
     Silent truncation of the input spec is a measurement-integrity bug.

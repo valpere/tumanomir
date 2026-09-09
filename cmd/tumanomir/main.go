@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -669,6 +670,15 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 // and exit 2. A nil error always comes with a fully populated
 // report.MeasureResult, even when valid samples < 2 (handled via
 // DPairVerdict == internal.VerdictSkipped, not as an error).
+//
+// One exception (REQ-MSR-05, issue #136): a per-request timeout
+// (context.DeadlineExceeded, the same class Ollama's own actionable hint
+// in internal/instrument/ollama.go already detects) is treated as a
+// retryable/discardable attempt for that one sample slot, not a run-wide
+// hard failure — a single slow sample under a tight --timeout shouldn't
+// abort N-1 other samples that would have succeeded. Every other error
+// (a genuinely broken instrument, bad model name, connection refused)
+// still hard-fails the whole run immediately, unchanged.
 func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentConfig, specContent []byte, samples int, th internal.Thresholds) (report.MeasureResult, error) {
 	prompt := instrument.BuildPrompt(specContent)
 
@@ -683,6 +693,13 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 		for attempt := 0; attempt < maxAttemptsPerSample; attempt++ {
 			g, err := gen.Generate(context.Background(), prompt)
 			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					// This one attempt timed out — retry while attempts
+					// remain for this slot, same as an invalid-Go-parse
+					// attempt below; never abort the whole run over it
+					// (issue #136).
+					continue
+				}
 				return report.MeasureResult{}, fmt.Errorf("generation failed: %w", err)
 			}
 			// The byte/3 preflight estimate under-counts non-ASCII (e.g.
