@@ -109,6 +109,11 @@ Scan for:
 - Whether the task touches a methodological invariant (`CLAUDE.md`
   §"Методологічні інваріанти") — if so, `docs/requirements.md` must be updated
   first; this is a technical decision, always surface it even in YES_MODE
+- Issue body explicitly labels part of its scope "optional"/"nice to
+  have" (not just any loose mention of the word) alongside a clearly
+  required core → split by default: ship the required part, file the
+  optional part as its own follow-up issue. Bundle only when the
+  optional part is a trivial sub-step of the required one.
 
 For each ambiguity:
 1. Search codebase for 1–3 concrete options grounded in existing patterns
