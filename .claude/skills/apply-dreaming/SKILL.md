@@ -38,8 +38,7 @@ if [[ "$WEEK" == "latest" ]]; then
   # find + mtime-sort, not ls -1t: handles special characters robustly,
   # and the digit-class year prefix doesn't hardcode "2026" (an ISO-week
   # filename like 2026-W01.md rolls into 2027-W## eventually — a literal
-  # year prefix would silently stop matching future reports). Same fix
-  # as curate-minions/SKILL.md's report selector.
+  # year prefix would silently stop matching future reports).
   REPORT=$(find "$DIR" -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]-W*.md' \
            -printf '%T@ %p\n' 2>/dev/null \
            | sort -rn | head -1 | cut -d' ' -f2-)
