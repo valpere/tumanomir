@@ -1,6 +1,6 @@
 ---
 name: static-analysis
-description: "Use after code-generator completes to run static analysis on tumanomir (Go, stdlib-only). Runs go vet + golangci-lint. Reports findings only — does not apply fixes unless they are trivial formatting issues. Invoke as part of the post-implementation review pipeline."
+description: "Use after code-generator completes to run static analysis on tumanomir (Go, stdlib-only except gopkg.in/yaml.v3). Runs go vet + golangci-lint. Reports findings only — does not apply fixes unless they are trivial formatting issues. Invoke as part of the post-implementation review pipeline."
 tools: Bash, Glob, Grep, Read
 model: haiku
 color: blue

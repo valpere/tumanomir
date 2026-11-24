@@ -66,7 +66,7 @@ Semver bump type: `patch` / `minor` / `major` (compare first version segment)
 
 Ecosystem detection:
 - Branch starts with `dependabot/github_actions/` → `github-actions`
-- `go.mod` present in repo root → `go` (always true for tumanomir — stdlib-only, v0.1;
+- `go.mod` present in repo root → `go` (always true for tumanomir — stdlib + gopkg.in/yaml.v3;
   Dependabot PRs here are exclusively `go.mod`/`go.sum` bumps and GitHub Actions bumps,
   never npm)
 - Otherwise → `npm` (not expected in this repo)
@@ -139,7 +139,7 @@ gh pr diff {number} --repo valpere/tumanomir -- go.sum 2>/dev/null | grep "^+" |
 
 ### Stage 6 — Bundle Impact
 
-**Skip if:** `github-actions` OR `go` — always skipped for tumanomir (stdlib-only, no
+**Skip if:** `github-actions` OR `go` — always skipped for tumanomir (Go only, no
 npm bundle to speak of; this stage never fires here).
 
 ---

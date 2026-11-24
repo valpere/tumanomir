@@ -1,6 +1,6 @@
 ---
 name: housekeeping
-description: "tumanomir (valpere/tumanomir, Go stdlib-only): recurring repo health check. Runs universal + Go-specific hygiene checks and outputs a pass/fail table. Usage: /housekeeping"
+description: "tumanomir (valpere/tumanomir, Go, stdlib-only except gopkg.in/yaml.v3): recurring repo health check. Runs universal + Go-specific hygiene checks and outputs a pass/fail table. Usage: /housekeeping"
 ---
 
 # Skill: /housekeeping

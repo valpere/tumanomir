@@ -1,6 +1,6 @@
 ---
 name: find-bugs
-description: "tumanomir (valpere/tumanomir, Go stdlib-only): find bugs, security vulnerabilities, and code quality issues in branch changes. Report-only — no code changes. Usage: /find-bugs [topic]"
+description: "tumanomir (valpere/tumanomir, Go, stdlib-only except gopkg.in/yaml.v3): find bugs, security vulnerabilities, and code quality issues in branch changes. Report-only — no code changes. Usage: /find-bugs [topic]"
 ---
 
 # Skill: /find-bugs
@@ -78,7 +78,7 @@ Check every item against every changed file:
   methodology's core claim depends on invalid rate being visible, never
   swallowed into a silently-smaller sample.
 
-> No React/TS, Node/Express surface in this repo (Go stdlib-only, v0.1) —
+> No React/TS, Node/Express surface in this repo (Go, stdlib-only except gopkg.in/yaml.v3, v0.1) —
 > those generic checklists are omitted.
 
 ---

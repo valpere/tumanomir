@@ -123,12 +123,12 @@ rather than debugging blind later.
 
 ### Known fragile areas
 
-Project is early (2 commits, v0.1 scaffold) — no TODO/FIXME markers, no
-historically fragile files yet (every `.go` file touched exactly once, in
-the initial commit). The known *future* fragile area, called out explicitly
-in `docs/investigation/history.md` and `docs/requirements.md` (REQ-MSR-06):
+No TODO/FIXME markers in `.go` files (2026-11-24). Highest churn (non-test):
+`cmd/tumanomir/main.go` (CLI flag parsing — `fix-cli-trailing-flags` class of
+bugs), `internal/types.go`, `internal/instrument/ollama.go`. The fragile area
+called out explicitly in `docs/investigation/history.md` and `docs/requirements.md` (REQ-MSR-06):
 
-- **`internal/instrument` (not yet implemented)** — Ollama integration.
+- **`internal/instrument`** — Ollama integration.
   Known failure modes from the article's experiment, already baked into
   requirements: `think:true` on reasoning models silently empties `content`
   (`num_predict` consumed by hidden thinking tokens); default `num_ctx=4096`
@@ -139,16 +139,15 @@ in `docs/investigation/history.md` and `docs/requirements.md` (REQ-MSR-06):
 
 ### Stack-specific debug notes
 
-- `go vet ./...` and `golangci-lint run` (installed, no `.golangci.yml` —
-  runs with default linter set) both catch real issues here; run both, not
+- `go vet ./...` and `golangci-lint run` (installed, configured by `.golangci.yml`) both catch real issues here; run both, not
   just `go test`.
 - `internal/dispersion` parses generated Go source at runtime
   (`go/parser`) — a parse failure there is *expected signal* (invalid
   generation, counted in `Discarded`), not a bug. Don't "fix" a
   `ValidGo() == false` case without checking whether the input was actually
   malformed Go first.
-- Reference data for dispersion regression tests (not yet written) lives
-  in-repo: `docs/investigation/_sanity/out*/` (120 generated files, 2
+- Archival reference corpus for dispersion tests lives
+  in-repo (fixtures proper: `internal/dispersion/testdata/`): `docs/investigation/_sanity/out*/` (120 generated files, 2
   instruments — see `docs/investigation/_sanity/README.md` for the expected
   reference numbers). `_`-prefixed so `go build`/`go vet` ignore it.
 
