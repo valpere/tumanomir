@@ -231,7 +231,7 @@ Read the pattern files and display a summary:
 - Wins: [N] logged
 - Cross-project patterns: [N]
 - Anti-patterns: [N]
-- Hard rules promoted: [N]
+- Improvement candidates recorded: [N]
 
 ### Verification Rate
 - Tasks with verification: [N]% (wins: [X]%, mistakes: [Y]%)
@@ -252,8 +252,8 @@ Read the pattern files and display a summary:
 |------|------|---------|
 | ... | mistake/win | pattern field |
 
-### Pending Promotions
-[List any patterns that have occurred 2+ times but haven't been promoted yet]
+### Open Improvement Candidates
+[List any patterns that have occurred 2+ times but have no scoped proposal yet]
 
 ### Last Retrospective
 [Date of last retro, or "Never — run /self-learn retro"]
@@ -283,20 +283,20 @@ Stop.
 Count entries per `category` field. If entries lack the field, infer from description.
 
 **Identify recurring patterns:**
-- Any mistake pattern occurring 2+ times → flag for hard rule promotion
+- Any mistake pattern occurring 2+ times → flag as an improvement candidate
 - Any mistake pattern occurring 3+ times → flag as anti-pattern
 
 **Verification correlation:**
 - Calculate win rate for tasks WITH verification vs WITHOUT
-- If tasks without verification fail 2x+ more → flag for hard rule
+- If tasks without verification fail 2x+ more → flag as an improvement candidate
 
 **Plan mode correlation:**
 - Calculate success rate for tasks that used plan mode vs didn't
-- If skipping planning correlates with failures → flag for hard rule
+- If skipping planning correlates with failures → flag as an improvement candidate
 
 **Session hygiene analysis:**
 - Count each session_hygiene flag across all mistakes
-- If any flag appears 3+ times → promote to anti-pattern
+- If any flag appears 3+ times → record in anti-patterns.md with its conditions and scope
 
 **Delegation analysis:**
 - Compare success rate of tasks using subagent delegation vs none
@@ -304,7 +304,7 @@ Count entries per `category` field. If entries lack the field, infer from descri
 
 **Decomposition analysis:**
 - Compare success rate of decomposed tasks (phased) vs monolithic prompts
-- If monolithic tasks fail more → promote decomposition as a best practice
+- If monolithic tasks fail more → record decomposition as an observed win pattern
 
 **Identify cross-project wins:**
 - Any win with `reusable_in` mentioning 2+ areas
