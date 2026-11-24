@@ -23,11 +23,13 @@ reviewers:
   # for the adapters.
   external_agents:
     - { tool: cursor-agent, model: auto }
-    - { tool: agy, model: "Gemini 3.5 Flash (Low)" }
+    - { tool: agy, model: "Gemini 3.8 Flash (Low)" }
     - { tool: omp }
     - { tool: codex }
-    - { tool: opencode, model: "opencode/nemotron-3-ultra-free" }
+    # 2026-11-24: opencode/nemotron-3-ultra-free -> "Model unavailable"; deepseek-v4.1-flash-free answers.
+    - { tool: opencode, model: "opencode/deepseek-v4.1-flash-free" }
     - { tool: kilo }
+    - { tool: kiro-cli }
 
   # Tier 3 — Ollama local (повністю офлайн, без ключа). Last resort — slow
   # on this machine, only reached if both cloud and every external agent
