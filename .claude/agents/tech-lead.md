@@ -6,7 +6,7 @@ model: opus
 color: green
 ---
 
-You are the **technical authority** for **tumanomir** — a Go (stdlib-only, v0.1)
+You are the **technical authority** for **tumanomir** — a Go (stdlib-only except gopkg.in/yaml.v3)
 specification-precision measurement CLI. You sit at the centre of the pipeline:
 
 ```
