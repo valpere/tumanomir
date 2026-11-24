@@ -27,15 +27,15 @@ Before installing, confirm the user has authorized it.
 
 ## Install
 
-**Recommended: run `/generate-ship`** — it discovers the project's stack, issue
+**Recommended: run `/generate-deliver`** — it discovers the project's stack, issue
 tracker, and agent names, then writes a fully wired version automatically.
 
-**Manual install** (canonical source: `~/wrk/common_claude/skills/ship/`):
+**Manual install** (canonical source: `~/wrk/common_claude/skills/deliver/`):
 
 ```bash
 mkdir -p .claude/skills/deliver/
-cp ~/wrk/common_claude/skills/ship/SKILL.md .claude/skills/deliver/
-cp ~/wrk/common_claude/skills/ship/PORTABILITY-GUIDE.md .claude/skills/deliver/
+cp ~/wrk/common_claude/skills/deliver/SKILL.md .claude/skills/deliver/
+cp ~/wrk/common_claude/skills/deliver/PORTABILITY-GUIDE.md .claude/skills/deliver/
 ```
 
 Then fill in the placeholders in `.claude/skills/deliver/SKILL.md`:
@@ -50,20 +50,11 @@ Then fill in the placeholders in `.claude/skills/deliver/SKILL.md`:
 
 ---
 
-## Issue tracker adapter
+## Issue tracker
 
-The canonical SKILL.md uses GitHub Issues by default (`gh` CLI, no MCP needed).
-For other trackers, replace the `<!-- TRACKER -->` blocks:
-
-| Operation | GitHub Issues (default) | ClickUp (MCP) |
-|-----------|------------------------|---------------|
-| List open | `gh issue list --assignee @me` | `clickup_search(statuses=["TODO","DEVELOPMENT"])` |
-| Fetch | `gh issue view {N} --json ...` | `clickup_get_task(task_id=ID)` |
-| Mark in-progress | `gh issue edit --add-label in-progress` | `clickup_update_task(status="DEVELOPMENT")` |
-| Mark in-review | `gh issue edit --add-label in-review` | `clickup_update_task(status="CHECK")` |
-| Post comment | `gh issue comment {N} --body "..."` | `clickup_create_task_comment(task_id, text)` |
-| Close | `gh issue close {N}` | `clickup_update_task(status="APPROVED")` |
-| Sprint detection | GitHub Milestone (`--milestone`) | `clickup_get_workspace_hierarchy()` |
+The canonical SKILL.md only supports GitHub Issues (`gh` CLI, no MCP needed) —
+list, fetch, mark in-progress/in-review, comment, and close all go through
+`gh issue *`. No other tracker adapter is currently wired up.
 
 ---
 
@@ -72,11 +63,10 @@ For other trackers, replace the `<!-- TRACKER -->` blocks:
 | Dependency | Required | Notes |
 |------------|----------|-------|
 | `/fix-review` skill | Yes | `.claude/skills/fix-review/` (project-local) |
-| `{AGENT_NAME}` agent | Yes | In `.claude/agents/` — discovered by `/generate-ship` |
+| `{AGENT_NAME}` agent | Yes | In `.claude/agents/` — discovered by `/generate-deliver` |
 | `static-analysis` agent | No | Run inside code-generator |
 | `security-reviewer` agent | No | Run inside code-generator |
 | `test-generator` agent | No | Run inside code-generator for hooks/utils/services |
-| Tracker MCP | Only for non-GitHub | ClickUp / Linear MCP if not using gh CLI |
 
 ---
 

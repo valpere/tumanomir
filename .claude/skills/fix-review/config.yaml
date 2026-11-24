@@ -46,7 +46,7 @@ arbiter: claude
 diff_scope: delta
 
 # AUTO_MERGE disabled: this project also runs /deliver, which owns the merge step
-# (STEP 3 of ship/SKILL.md). fix-review must not merge — see SKILL.md STEP 10.
+# (STEP 3 of deliver/SKILL.md). fix-review must not merge — see SKILL.md STEP 10.
 auto_merge: false
 
 post_summary_to_pr: true
