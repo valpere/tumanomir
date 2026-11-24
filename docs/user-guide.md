@@ -183,8 +183,10 @@ measure: generation failed: instrument: estimated prompt tokens (427, len(prompt
 
 `--timeout` обмежує кожен окремий HTTP-запит до бекенда (дефолт `5m`,
 власний дефолт Ollama, зроблений явним) — збільшуйте для повільних або
-CPU-bound локальних моделей: інакше тайм-аут одного запиту скасовує весь
-прогін з N семплів, а не тільки той семпл (REQ-MSR-10):
+CPU-bound локальних моделей. Спроба з тайм-аутом повторюється, як невалідна,
+а семпл, усі спроби якого вийшли за тайм-аут, відкидається (REQ-MSR-05),
+тож затісний тайм-аут видно як високий discard rate, а не як помилку
+(REQ-MSR-10):
 
 ```bash
 bin/tumanomir measure --instrument ollama:qwen3-coder:30b \
@@ -668,7 +670,7 @@ downstream-результат), якого на старті проєкту ще
 | `measure: unsupported backend "openai"; only "ollama" is supported` | backend, відмінний від `ollama` | Наразі підтримується лише `ollama` (roadmap: інші прилади) |
 | `measure: --num-ctx is required (must exceed the prompt token count)` | не передано `--num-ctx` (або `<= 0`) | додайте `--num-ctx <N>` з запасом над розміром промпту |
 | `measure: generation failed: instrument: estimated prompt tokens (427, ...) + num_predict (2048) exceeds num_ctx (100); increase num_ctx or reduce num_predict` | preflight-перевірка (REQ-MSR-06): промпт + `num_predict` не влазять у `num_ctx` | збільшіть `--num-ctx` або зменшіть `--num-predict` |
-| `measure: generation failed: instrument: ollama request failed: ... context deadline exceeded ... (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)` | запит перевищив `--timeout` (дефолт 5m, REQ-MSR-10) — повільна/CPU-bound локальна модель, або завеликі `--num-ctx`/`--num-predict` | збільшіть `--timeout` (напр. `--timeout 15m`), зменшіть `--num-ctx`/`--num-predict`, або оберіть швидший прилад |
+| `⚠ discard rate: 70% (7/10 generations invalid) — exceeds the 40% hypothesis threshold (REQ-MSR-05); results may be unreliable` | понад 40% семплів відкинуто: кожна спроба або не дала валідного Go, або перевищила `--timeout` (дефолт 5m, REQ-MSR-10) | щоб розрізнити, `--keep-samples <dir>` пише `*.discard.txt` або `*.timeout.txt`. Для тайм-аутів збільшіть `--timeout` (напр. `--timeout 15m`), зменшіть `--num-ctx`/`--num-predict` або оберіть швидший прилад |
 | `check: --format must be "text" or "json", got "xml"` | `--format` з невідомим значенням | лише `text` або `json` |
 | `gate: --temp was passed but no instrument resolved (...) — refusing to silently downgrade to deterministic-only (REQ-GATE-02)` | measure-специфічний прапорець на `gate` без визначеного приладу | додайте `--instrument` (або приберіть цей прапорець, якщо хотіли лише детермінований прогін) |
 | `calibrate: corpus mixes instruments "ollama:qwen3-coder:30b" and "ollama:glm-5.1:cloud" — all rows in one run must share the same instrument (REQ-MSR-04)` | другий, відмінний `instrument` у корпусі | розділіть корпус по приладу — один прогін `calibrate` на один прилад |

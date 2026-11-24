@@ -184,8 +184,10 @@ for H/H_norm, default 0.95.
 
 `--timeout` bounds each individual HTTP request to the backend (default
 `5m`, Ollama's own default made explicit) — raise it for slow or
-CPU-bound local models, since one request timing out otherwise aborts the
-whole N-sample run rather than just that one sample (REQ-MSR-10):
+CPU-bound local models. A timed-out attempt is retried like an invalid one,
+and a sample whose every attempt times out is discarded (REQ-MSR-05), so a
+too-tight timeout shows up as a high discard rate, not as an error
+(REQ-MSR-10):
 
 ```bash
 bin/tumanomir measure --instrument ollama:qwen3-coder:30b \
@@ -667,7 +669,7 @@ while writing this guide), not a paraphrase.
 | `measure: unsupported backend "openai"; only "ollama" is supported` | a backend other than `ollama` | Only `ollama` is supported (other instruments are on the roadmap) |
 | `measure: --num-ctx is required (must exceed the prompt token count)` | `--num-ctx` not passed (or `<= 0`) | add `--num-ctx <N>` with headroom over the prompt size |
 | `measure: generation failed: instrument: estimated prompt tokens (427, ...) + num_predict (2048) exceeds num_ctx (100); increase num_ctx or reduce num_predict` | the preflight check (REQ-MSR-06): prompt + `num_predict` don't fit `num_ctx` | raise `--num-ctx` or lower `--num-predict` |
-| `measure: generation failed: instrument: ollama request failed: ... context deadline exceeded ... (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)` | the request exceeded `--timeout` (default 5m, REQ-MSR-10) — slow/CPU-bound local model, or too large a `--num-ctx`/`--num-predict` | raise `--timeout` (e.g. `--timeout 15m`), lower `--num-ctx`/`--num-predict`, or use a faster instrument |
+| `⚠ discard rate: 70% (7/10 generations invalid) — exceeds the 40% hypothesis threshold (REQ-MSR-05); results may be unreliable` | more than 40% of samples were discarded: every attempt either produced no valid Go or exceeded `--timeout` (default 5m, REQ-MSR-10) | see which: `--keep-samples <dir>` writes `*.discard.txt` vs `*.timeout.txt`. For timeouts, raise `--timeout` (e.g. `--timeout 15m`), lower `--num-ctx`/`--num-predict`, or use a faster instrument |
 | `check: --format must be "text" or "json", got "xml"` | `--format` with an unrecognized value | only `text` or `json` |
 | `gate: --temp was passed but no instrument resolved (...) — refusing to silently downgrade to deterministic-only (REQ-GATE-02)` | a measure-specific flag on `gate` with no instrument resolved | add `--instrument` (or drop that flag if you wanted a deterministic-only run) |
 | `calibrate: corpus mixes instruments "ollama:qwen3-coder:30b" and "ollama:glm-5.1:cloud" — all rows in one run must share the same instrument (REQ-MSR-04)` | a second, distinct `instrument` in the corpus | split the corpus by instrument — one `calibrate` run per instrument |
