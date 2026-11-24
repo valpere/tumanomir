@@ -93,7 +93,8 @@ uncalibrated hypotheses — tune them on your own spec corpus.
 
 ## Status
 
-v0.1 shipped, tagged [`v0.1.0`](https://github.com/valpere/tumanomir/releases/tag/v0.1.0):
+Current release: [`v0.2.0`](https://github.com/valpere/tumanomir/releases/tag/v0.2.0)
+(first tagged release: `v0.1.0`).
 `check`, `measure`, `gate`, `calibrate`, and `label` are all **implemented**
 and work end-to-end. See `docs/requirements.md` (written in tumanomir's own
 traceable markup — we eat our own dog food), `docs/architecture.md` for how
