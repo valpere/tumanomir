@@ -49,6 +49,9 @@ tmp/
 .claude/sessions.db-shm
 .claude/sessions.db-wal
 .claude/session-log.md
+.claude/session-checkpoint.json
+.claude/session-checkpoint.json.lock
+.claude/session-state.md
 # fix-review run history (per machine)
 .claude/skills/fix-review/telemetry.jsonl
 # dreaming run log (per machine) — reports/ itself IS tracked so the
