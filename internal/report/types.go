@@ -50,6 +50,9 @@ type MeasureResult struct {
 	// --keep-samples (REQ-MSR-11). json:"-" keeps the report JSON
 	// (REQ-OUT-03) unchanged.
 	Attempts []SampleRecord `json:"-"`
+	// Decls is the opt-in per-declaration agreement diagnostic (REQ-MSR-12,
+	// `measure --decls`). Nil unless requested or when N<2; never gated.
+	Decls []internal.DeclAgreement `json:"decls,omitempty"`
 }
 
 // Report is gate's unified result (@schema Report, REQ-GATE-01): it wraps

@@ -94,6 +94,15 @@ Flags for measure (and gate, once an instrument resolves):
                             keep_samples: sets it, --keep-samples= disables;
                             REQ-MSR-11)
 
+Flags for measure only:
+  --decls          bool    opt-in: add a per-declaration agreement report
+                            showing where the accepted samples diverge
+                            (type/field/method/func slots, least agreed
+                            first). Diagnostic only: no metric, no gate,
+                            exit code unchanged; slot matching is a
+                            heuristic and field renames are not matched
+                            (default off; REQ-MSR-12)
+
 gate fails with exit code 2 if any measure-specific flag above is passed
 explicitly while no instrument resolves (CLI flags or .tumanomir.yaml's
 instrument: section) — a silently-downgraded gate run is a
@@ -555,6 +564,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		think          bool
 		timeout        time.Duration
 		keepSamples    string
+		decls          bool
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
@@ -569,6 +579,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
 	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples, "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
+	fs.BoolVar(&decls, "decls", false, "opt-in: print a per-declaration agreement report (REQ-MSR-12)")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("measure", formatFlag) {
@@ -624,6 +635,15 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		return 2
 	}
 	keepRun("measure", keepSamples, specContent, mr)
+	if decls {
+		var accepted [][]byte
+		for _, a := range mr.Attempts {
+			if a.Kind == report.SampleAccepted {
+				accepted = append(accepted, a.Data)
+			}
+		}
+		mr.Decls = dispersion.Decls(accepted)
+	}
 
 	// Opt-in corpus accretion (issue #107): off by default (config.CorpusEnabled
 	// is false unless .tumanomir.yaml explicitly sets corpus.enabled: true). When

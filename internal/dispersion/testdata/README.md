@@ -79,3 +79,12 @@ skeletons), and is the input to a future Phase 2 go/no-go decision on
 whether to add an additive, non-gating `D_pair_shape` diagnostic
 (identifier-canonicalized feature keys). That decision is NOT made by
 these fixtures — they only measure and pin the baseline.
+
+## Per-declaration agreement fixture (REQ-MSR-12)
+
+`dreet-dojo-req-uc-32cc10f/` holds 10 generated Go blocks (`01.go`..`10.go`)
+for `dispersion.Decls` / `measure --decls`. `05.go.invalid` does not parse,
+so N = 9. It has its own `README.md` with provenance, pinned `Analyze`
+reference numbers, and the slot expectations asserted in
+`internal/dispersion/decls_test.go`. Its samples are hand-regenerated and are
+not the samples of the measured run; do not compare against that run's D_pair.

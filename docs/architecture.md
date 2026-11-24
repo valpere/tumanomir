@@ -100,6 +100,8 @@ tumanomir version                       # надрукувати версію і
                           та instrument.json у свіжу піддиректорію цієї dir
                           (шлях — у stderr; keep_samples: у .tumanomir.yaml;
                           --keep-samples= вимикає; REQ-MSR-11)
+--decls          bool    лише measure; опційно: звіт узгодження за деклараціями
+                          (діагностика, без метрики й гейту; REQ-MSR-12)
 
 # gate only
 --explain        bool    on non-zero exit, print which layer(s) failed and
@@ -169,7 +171,7 @@ internal/types.go       спільні типи (Verdict, Thresholds, Instrument
 internal/config/        завантаження .tumanomir.yaml (REQ-CFG-02/03)
 internal/spec/          завантаження markdown-специфікацій (файл або директорія)
 internal/metrics/       K_drift (лінтер трасування), D_const (лексичний сканер)
-internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair
+internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair; Decls — діагностичне узгодження за деклараціями (REQ-MSR-12)
 internal/instrument/    інтерфейс Generator, Ollama-бекенд, PromptV1 + фрейм-екстрактор
 internal/report/        рендеринг CheckResult/MeasureResult/Report у TTY-звіт (REQ-OUT-01)
 internal/samples/       запис --keep-samples: NN.go, discard/timeout, instrument.json (REQ-MSR-11)
