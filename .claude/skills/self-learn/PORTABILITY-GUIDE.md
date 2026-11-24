@@ -6,15 +6,12 @@ Install reference for Claude Code agents.
 
 ## What this skill does
 
-Structured feedback loop: logs mistakes and wins as JSONL, auto-promotes
-recurring patterns to hard rules in CLAUDE.md, and runs retrospectives
-to surface systemic insights.
+Structured feedback loop: logs sourced mistakes and wins as JSONL, identifies
+recurring patterns as scoped improvement candidates (without auto-editing `CLAUDE.md`),
+and runs retrospectives to surface systemic insights.
 
 Commands: `/self-learn` (status) · `/self-learn log` · `/self-learn retro`
 · `/self-learn init` · `/self-learn tips`
-
-Always-on: proactively checks pattern store before/after tasks and coaches
-on session hygiene — without explicit invocation.
 
 ---
 
@@ -28,18 +25,32 @@ Before installing, confirm the user has authorized adding this skill.
 
 ## Install
 
-Canonical source: `~/wrk/common/skills/self-learn/`
+Canonical source: `~/wrk/common_claude/skills/self-learn/`
+
+### Quick start (generic)
 
 ```bash
 mkdir -p .claude/skills/self-learn/
-cp ~/wrk/common/skills/self-learn/SKILL.md .claude/skills/self-learn/
-cp ~/wrk/common/skills/self-learn/PORTABILITY-GUIDE.md .claude/skills/self-learn/
+cp ~/wrk/common_claude/skills/self-learn/SKILL.md .claude/skills/self-learn/
+cp ~/wrk/common_claude/skills/self-learn/PORTABILITY-GUIDE.md .claude/skills/self-learn/
 ```
 
 Then run `/self-learn init` — it creates `_patterns/` and `_knowledge-base/`
 in the project root if they don't exist.
 
 Verify: `.claude/skills/self-learn/SKILL.md` exists and `_patterns/mistakes.jsonl` was created.
+
+### Full inject (project-specific)
+
+```bash
+mkdir -p .claude/skills/generate-self-learn
+cp ~/wrk/common_claude/skills/self-learn/generate/SKILL.md .claude/skills/generate-self-learn/SKILL.md
+```
+
+Then run `/generate-self-learn` — reads `CLAUDE.md`, extracts explicit banned
+patterns, pre-populates `_patterns/anti-patterns.md` with them, and creates
+`_patterns/`. Do not wire `PostToolUse` prompt hooks or unverified LLM `Stop`
+autolog hooks. `generate-self-learn` can be deleted from `.claude/skills/` once it's run.
 
 ---
 
@@ -97,12 +108,12 @@ adding integration reminders.
 
 ---
 
-## How promotion works
+## How candidates work
 
 ```
-2× same pattern  →  hard rule added under ## Self-Learning Hard Rules in CLAUDE.md
-3× same pattern  →  entry added to _patterns/anti-patterns.md
-win.reusable_in covers 2+ areas  →  promoted to _patterns/cross-project.md
+2× same pattern  →  recorded as a scoped improvement candidate with source examples (no auto-edits to CLAUDE.md)
+3× same pattern  →  recorded with its conditions and scope in _patterns/anti-patterns.md (not a universal prohibition)
+win.reusable_in covers 2+ areas  →  recorded in _patterns/cross-project.md
 ```
 
 ---
