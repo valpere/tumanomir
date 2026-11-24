@@ -83,6 +83,22 @@ ollama_payload_system_no_think() {
       stream:false, think:false, options:{num_predict:$np}}'
 }
 
+# Opposite of the no_think variant: think enabled. 5th arg = think value as
+# JSON — true (max effort, default) or a level string such as "low".
+# For models whose think:false output leaks reasoning prose into `content`
+# instead of the JSON array (glm-5.3: 0 findings in 49/49 lance-agent rounds).
+# Measured 2026-10-24 on one 34-line diff, glm-5.3: think:"low" -> valid JSON in
+# 10 s / 641 tokens; "medium" -> 4000 tokens all thinking, empty content;
+# true (max) -> empty at 10000, valid only at ~16000 tokens. Use "low" with the
+# normal 4000 cap; use true only with a cap of ~16000 (num_predict includes
+# thinking tokens).
+ollama_payload_system_think() {
+  local num_predict="${4:-16000}" think="${5:-true}"
+  jq -n --arg model "$1" --arg sys "$2" --arg prompt "$3" --argjson np "$num_predict" --argjson th "$think" \
+    '{model:$model, messages:[{role:"system",content:$sys},{role:"user",content:$prompt}],
+      stream:false, think:$th, options:{num_predict:$np}}'
+}
+
 # ---------------------------------------------------------------------------
 # OpenRouter — /api/v1/chat/completions (OpenAI-compatible)
 # Response: { "choices": [{ "message": { "content": "..." } }] }
@@ -141,33 +157,54 @@ chat_payload_system() {
 # Optional 5th arg: num_predict cap, Ollama branch only (default 4000).
 chat_payload_system_no_think() {
   case "$1" in
-    openrouter) openrouter_payload_system_no_think "$2" "$3" "$4" ;;
-    *)          ollama_payload_system_no_think      "$2" "$3" "$4" "$5" ;;
+    openrouter)    openrouter_payload_system_no_think "$2" "$3" "$4" ;;
+    openai_compat) openrouter_payload_system_no_think "$2" "$3" "$4" ;;
+    *)             ollama_payload_system_no_think      "$2" "$3" "$4" "$5" ;;
+  esac
+}
+
+# Like chat_payload_system but with think enabled: 5th arg cap (default 16000),
+# 6th arg think JSON (default true; e.g. '"low"'). OpenRouter has no per-call
+# think switch here — it gets the plain system payload.
+# Usage: PAYLOAD=$(chat_payload_system_think "$PROVIDER" "$MODEL" "$SYSTEM" "$PROMPT" [cap] [think])
+chat_payload_system_think() {
+  case "$1" in
+    openrouter)    openrouter_payload_system "$2" "$3" "$4" ;;
+    openai_compat) openrouter_payload_system "$2" "$3" "$4" ;;
+    *)             ollama_payload_system_think "$2" "$3" "$4" "${5:-}" "${6:-}" ;;
   esac
 }
 
 # Extract assistant content from a raw API response.
 # Usage: CONTENT=$(chat_content "$PROVIDER" "$RESPONSE")
+# Provider values:
+#   - "openrouter"    — /api/v1/chat/completions (OpenAI-compat)
+#   - "openai_compat" — same as "openrouter" (alias, more explicit at call site)
+#   - anything else   — native Ollama /api/chat
 chat_content() {
   case "$1" in
-    openrouter) openrouter_content "$2" ;;
-    *)          ollama_content     "$2" ;;
+    openrouter|openai_compat) openrouter_content "$2" ;;
+    *)                        ollama_content     "$2" ;;
   esac
 }
 
 # Extract token counts from a response.
 # Returns "PROMPT_TOKENS COMPLETION_TOKENS" (space-separated).
-# Ollama responses return "null null" (no token data in /api/chat).
+# Ollama native responses return "null null" (no token data in /api/chat).
+# OpenAI-compat responses (openrouter, openai_compat) DO return .usage.
 # Usage: read pt ct < <(chat_tokens "$PROVIDER" "$RESPONSE")
 chat_tokens() {
-  if [ "$1" = "openrouter" ]; then
-    local p c
-    p=$(printf '%s' "$2" | jq -r '.usage.prompt_tokens     // empty' 2>/dev/null)
-    c=$(printf '%s' "$2" | jq -r '.usage.completion_tokens // empty' 2>/dev/null)
-    printf '%s %s' "${p:-null}" "${c:-null}"
-  else
-    printf 'null null'
-  fi
+  case "$1" in
+    openrouter|openai_compat)
+      local p c
+      p=$(printf '%s' "$2" | jq -r '.usage.prompt_tokens     // empty' 2>/dev/null)
+      c=$(printf '%s' "$2" | jq -r '.usage.completion_tokens // empty' 2>/dev/null)
+      printf '%s %s' "${p:-null}" "${c:-null}"
+      ;;
+    *)
+      printf 'null null'
+      ;;
+  esac
 }
 
 # Convenience: POST + extract content in a single call.

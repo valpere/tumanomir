@@ -1,6 +1,6 @@
 ---
 name: fix-review
-description: "tumanomir (valpere/tumanomir) multi-model PR review with parallel fan-out. Provider: Ollama cloud (glm-5.1, deepseek-v4-flash, kimi-k2.6) primary, external-agent CLIs (cursor-agent/omp/codex/opencode/kilo) tier-2 failover, Ollama local tier-3. Claude acts as Arbiter — confirms, escalates, or dismisses findings using vote count as confidence signal. Applies a single consolidated fix commit. Does NOT merge — /ship owns the merge. Usage: /fix-review [PR-number]"
+description: "tumanomir (valpere/tumanomir) multi-model PR review with parallel fan-out. Provider: Ollama cloud (glm-5.3, deepseek-v4.1-flash, kimi-k2.6) primary, external-agent CLIs (cursor-agent/agy/omp/codex/opencode/kilo/kiro-cli) tier-2 failover, Ollama local tier-3. Claude acts as Arbiter — confirms, escalates, or dismisses findings using vote count as confidence signal. Applies a single consolidated fix commit. Does NOT merge — /ship owns the merge. Usage: /fix-review [PR-number]"
 ---
 
 # Skill: /fix-review (parallel)
@@ -14,8 +14,8 @@ Three model rounds run **in parallel**, then a single Claude arbiter
 round adjudicates and applies the consolidated fix.
 
 ```
-        ┌─→ Round 1 (glm-5.1)             ┐
-diff ───┼─→ Round 2 (deepseek-v4-flash)    ┼─→ aggregate (dedupe + vote count)
+        ┌─→ Round 1 (glm-5.3)             ┐
+diff ───┼─→ Round 2 (deepseek-v4.1-flash)  ┼─→ aggregate (dedupe + vote count)
         └─→ Round 3 (kimi-k2.6)           ┘
                                     ↓
                               Arbiter (Claude) — rules + ONE fix → commit → push
@@ -129,7 +129,7 @@ probe_provider() {
 ACTIVE_PROVIDER="ollama"
 ACTIVE_API_URL="$API_URL"
 ACTIVE_KEY="$API_KEY"
-ACTIVE_MODELS=("$MODEL_R1" "$MODEL_R2" "$MODEL_R3")   # glm-5.1:cloud, deepseek-v4-flash:cloud, kimi-k2.6:cloud
+ACTIVE_MODELS=("$MODEL_R1" "$MODEL_R2" "$MODEL_R3")   # glm-5.3:cloud, deepseek-v4.1-flash:cloud, kimi-k2.6:cloud
 FAILOVER_TIER=""
 FAILOVER_REASON=""
 
@@ -185,7 +185,7 @@ reliably handle three concurrent large-model calls without timing out.
 OpenAI-compatible endpoint — this project never uses that one) takes `think`
 as a top-level request field, not inside `options`. The shared
 `chat_payload_system` helper doesn't set it (documented no-op for Ollama), so
-reasoning-capable cloud models (`deepseek-v4-flash`, `kimi-k2.6`) can burn
+reasoning-capable cloud models (`deepseek-v4.1-flash`, `kimi-k2.6`) can burn
 their entire token budget on hidden thinking and return empty content on
 large diffs — confirmed on PR #88 and #89. Step 3 builds the payload directly
 with `think:false` and a capped `num_predict` for every round by default
