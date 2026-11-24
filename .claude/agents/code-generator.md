@@ -70,7 +70,7 @@ If no plan exists or tech-lead has not approved it: stop and ask.
 ```
 Issue / task → tech-lead (APPROVED) → code-generator (YOU) → tech-lead review
              → static-analysis + docs-maintainer → push + PR (YOU)
-             → /ship (/fix-review + merge)
+             → /deliver (/fix-review + merge)
 ```
 
 ---
@@ -141,7 +141,7 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
 
 ### 7. Tech Lead post-implementation review
 
-Before handing off to `/ship`, launch the `tech-lead` agent with the full diff:
+Before handing off to `/deliver`, launch the `tech-lead` agent with the full diff:
 ```bash
 git diff origin/main...HEAD
 ```
@@ -154,7 +154,7 @@ Wait for verdict:
 ### 8. Push branch and create PR
 
 Once Tech Lead has approved (plain or with changes applied), push the
-branch and open the PR yourself — `/ship` does not create it, only reviews
+branch and open the PR yourself — `/deliver` does not create it, only reviews
 and merges it:
 
 ```bash
@@ -178,7 +178,7 @@ PR: #<number> — <url>
 Files changed: <list>
 Tests: <N passing, 0 failing>
 Tech Lead: APPROVED
-Ready for /ship
+Ready for /deliver
 ```
 
 ---
