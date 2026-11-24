@@ -37,9 +37,11 @@ updating `docs/requirements.md` first):
   (= H / log₂N) is ordinal ("one cluster or many"), reported but never
   gated; raw H (bits) is also printed in the report but saturates at
   log₂N for small N. Alongside the point estimate, `measure`/`gate` print a
-  95% bootstrap confidence interval for D_pair (2000 resamples of the AST
-  feature vectors, N>=2, fixed seed — REQ-MSR-07) — also advisory; the gate
-  still compares the point estimate.
+  95% bootstrap confidence interval for D_pair (2000 resamples of sample
+  indices over the similarity matrix, scoring only pairs with distinct
+  original indices, N>=2, fixed seed — REQ-MSR-07) — also advisory; the gate
+  still compares the point estimate. Not informative at very small N (N=2
+  gives [D, D]).
 - Metrics are instrument-relative: the full configuration (backend, model,
   temperature, N, think, num_ctx, num_predict, sim_threshold, prompt) is
   fixed and printed in every `measure` report (REQ-MSR-04).

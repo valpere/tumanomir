@@ -26,7 +26,7 @@ suffix keeps `loadGoFixtures` (`*.go` glob) from picking it up.
 
 | N | D_pair | 95% CI | H (bits) | clusters |
 |---|--------|--------|----------|----------|
-| 9 | 0.2462 | [0.1554, 0.2616] | 3.1699 (H_norm 1.00) | 9 (all singletons) |
+| 9 | 0.2462 | [0.1895, 0.2972] | 3.1699 (H_norm 1.00) | 9 (all singletons) |
 
 Asserted in `TestDeclsFixtureRender` (`internal/dispersion/decls_test.go`).
 

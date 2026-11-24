@@ -96,11 +96,11 @@ Instrument config (REQ-MSR-04):
   sim_threshold:  0.95
   prompt:         PromptV1 (276 bytes)
 
-  D_pair:   0.33  [block]  (95% CI [-0.00, 0.33]; threshold 0.30, mean sim 0.67, N=3 valid, 0 discarded)
+  D_pair:   0.25  [ok]     (95% CI [0.07, 0.34]; threshold 0.30, mean sim 0.75, N=3 valid, 0 discarded)
   H:        1.58  bits (ordinal signal only, not gated)
   H_norm:   1.00  (ordinal signal only, not gated)
 
-exit code: 1 (gate failed)
+exit code: 0 (gates pass)
 ```
 
 `--instrument`, `--num-ctx`, and `--num-predict` are required — details in
@@ -198,7 +198,10 @@ creates its own subdirectory `<dir>/<spec-hash>-<instrument-hash>-<random>/`
 verbatim, in analysis order), `sSS-aA.discard.txt` (raw invalid attempts),
 `sSS-aA.timeout.txt` (timed-out attempts) and `instrument.json`. Re-running
 `dispersion.Analyze` over the sorted `.go` files reproduces D_pair, CI,
-clusters and H exactly. The created path is printed to stderr; stdout is
+clusters and H exactly. Kept directories written before the REQ-MSR-07 bootstrap fix reproduce the
+corrected CI, not the one printed at the time. The CI is not informative at
+very small N: N=2 always gives [D, D], and at N=3 it is bounded by the three
+pairwise distances. The created path is printed to stderr; stdout is
 unchanged. A write failure is only a stderr warning (exit code unchanged).
 Config: top-level `keep_samples: <dir>`; the flag overrides it and
 `--keep-samples=` disables it. Works on `gate` too (an explicit flag with no
@@ -249,7 +252,7 @@ full instrument configuration (backend, model, temperature, N, think,
 num_ctx, num_predict, sim_threshold, prompt version) — not decoration:
 a `D_pair` measured under one configuration is **not comparable** to a
 `D_pair` under another (a different model, temperature, or N) without
-recalibration. "D_pair = 0.33" by itself means nothing — it's only
+recalibration. "D_pair = 0.25" by itself means nothing — it's only
 meaningful together with the `Instrument config` block printed above it.
 
 **Thresholds are uncalibrated hypotheses.** `--d-pair-max` (default 0.30),
@@ -289,14 +292,14 @@ bin/tumanomir gate --instrument ollama:qwen3-coder:30b -n 3 \
 {
   "n": 3,
   "discarded": 0,
-  "mean_sim": 0.812044357642638,
-  "d_pair": 0.18795564235736195,
-  "d_pair_ci_low": 0,
-  "d_pair_ci_high": 0.1885752229329093,
-  "clusters": 2,
+  "mean_sim": 0.5789396766245629,
+  "d_pair": 0.4210603233754371,
+  "d_pair_ci_low": 0.27556809339898114,
+  "d_pair_ci_high": 0.5590414481559016,
+  "clusters": 3,
   "sim_thresh": 0.95,
-  "h": 0.9182958340544896,
-  "h_norm": 0.579380164285695
+  "h": 1.584962500721156,
+  "h_norm": 0.9999999999999999
 }
 ```
 

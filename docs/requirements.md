@@ -178,15 +178,25 @@ for exactly that reason.
 13. [REQ-MSR-07] D_pair's point estimate must be reported alongside a 95%
     bootstrap confidence interval, so the report is honest about the
     sampling noise visible across independent instruments at the same N.
-    The bootstrap is defined operationally: resample the N AST feature
-    vectors with replacement B=2000 times; for each resample, compute
-    mean pairwise cosine similarity over the resampled multiset (not the
-    precomputed similarity matrix — a resample can draw the same original
-    sample twice, and the matrix's diagonal is never populated) and take
-    1 − that mean; the CI bounds are the 2.5th and 97.5th percentiles of
-    the resulting 2000 D_pair values. This is purely additive: it does not
-    change D_pair's definition, and DPairVerdict still gates on the point
-    estimate alone — the CI is advisory, like H/H_norm (REQ-MSR-02).
+    The bootstrap is defined operationally: resample the N original sample
+    indices with replacement B=2000 times; for each resample, average the
+    precomputed pairwise similarity (the Analyze matrix, bit-identical to a
+    fresh cosine) only over pairs whose two ORIGINAL indices differ, and
+    take 1 − that mean. Self-pairs (a resample drawing the same original
+    sample twice) are not scored: counting them as similarity 1 would
+    center the bootstrap on (1 − 1/N)·D_pair and shift the CI down by
+    about 1/N, while excluding them makes each kept pair uniform over the
+    distinct original pairs and centers the bootstrap on D_pair. A resample
+    with no distinct-index pair (probability N^(1−N)) is redrawn; total
+    attempts are capped at 100·B, percentiles are taken over the D* values
+    collected, and if none were collected the CI is (D_pair, D_pair). The
+    CI bounds are the 2.5th and 97.5th percentiles of the collected D*
+    values. The CI is not informative at very small N: N=2 always gives
+    [D_pair, D_pair], and at N=3 it is bounded by the three pairwise
+    distances — a limit of the bootstrap, not a claim of precision. This
+    is purely additive: it does not change D_pair's definition, and
+    DPairVerdict still gates on the point estimate alone — the CI is
+    advisory, like H/H_norm (REQ-MSR-02).
     -> [FUN-MSR-07] dispersion.Analyze populates DispersionResult{DPairCILow, DPairCIHigh}
 
     B, the fixed RNG seed, and the 95% CI level are compile-time
