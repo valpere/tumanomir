@@ -60,9 +60,10 @@ Productization of the methodology from the article "Source of the Unknown".
 
 ## Build and verify
 
-The binary is built into `bin/` via `make`, not `go build`/`go run` directly.
+The binary is built into `bin/` via `make build`, not `go build`/`go run` directly.
 
 ```bash
+make           # = make help: list targets
 make build     # -> bin/tumanomir
 make install   # -> $GOBIN/tumanomir (or $GOPATH/bin), on $PATH
 make vet
