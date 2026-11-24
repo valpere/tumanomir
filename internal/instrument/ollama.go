@@ -24,7 +24,7 @@ const defaultBaseURL = "http://localhost:11434"
 // duplicate the literal in a second place that could drift from this one.
 const DefaultTimeout = 5 * time.Minute
 
-// Ollama is the v0.1 Generator backend, talking to Ollama's /api/chat
+// Ollama is the Generator backend, talking to Ollama's /api/chat
 // endpoint (stream:false, one complete JSON object per request).
 //
 // BaseURL defaults to defaultBaseURL ("http://localhost:11434") when empty.
@@ -100,7 +100,7 @@ type chatResponse struct {
 }
 
 // EstimatePromptTokens is the conservative, stdlib-only token estimate
-// used by Generate's preflight (no tokenizer in v0.1): ~3 bytes/token,
+// used by Generate's preflight (no tokenizer): ~3 bytes/token,
 // rounded up, errs toward refusing rather than passing a prompt that
 // would truncate the output. Plain len(prompt)/3 would round down and
 // could underestimate, defeating the "errs toward refusing" guarantee.
@@ -209,7 +209,7 @@ func (o *Ollama) Generate(ctx context.Context, prompt string) (Generation, error
 // isUnsupportedThinkError reports whether msg is Ollama's "model does not
 // support thinking" error. The exact wording is a moving target across
 // Ollama versions, so a case-insensitive substring check on the two
-// distinguishing words is sufficient for v0.1.
+// distinguishing words is sufficient.
 func isUnsupportedThinkError(msg string) bool {
 	lower := strings.ToLower(msg)
 	return strings.Contains(lower, "does not support") && strings.Contains(lower, "think")

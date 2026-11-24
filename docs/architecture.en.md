@@ -152,7 +152,7 @@ being the actual dedup key) ask for `--instrument` to disambiguate.
 `outcome`. The rewrite (every row read, only the matched one mutated,
 every row written back out) is atomic — temp file + `os.Rename` — and
 every untouched row, including malformed ones `LoadCorpus` would itself
-skip, round-trips byte-for-byte. No file locking in v0.1: concurrent
+skip, round-trips byte-for-byte. No file locking: concurrent
 `measure`/`label` runs against the same corpus are last-writer-wins, the
 same single-user-CLI stance `AppendRow` already takes.
 

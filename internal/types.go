@@ -97,7 +97,7 @@ type KDriftResult struct {
 // cheap textual approximation of "how much of this spec's prose is
 // actually load-bearing constraint, versus filler." It is intentionally
 // not a structural/graph-based measure (see docs/roadmap.md's RFLP-graph
-// exploratory item) — this is the v0.1 lexical stand-in.
+// exploratory item) — this is a lexical stand-in.
 type DConstResult struct {
 	// ConstraintMarkers counts recognized constraint-bearing tokens
 	// (@schema/@constraint annotations, etc.) in the scanned spec.
@@ -118,7 +118,7 @@ type DConstResult struct {
 // constraints; no Default constructor is provided here because SimThreshold
 // has no calibrated default wired into code yet — callers must supply one.
 type InstrumentConfig struct {
-	// Backend selects the Generator implementation; v0.1 supports only
+	// Backend selects the Generator implementation; currently only
 	// "ollama" (see internal/instrument.NewOllama).
 	Backend string `json:"backend"`
 	// Model is the backend-specific model identifier, e.g. "qwen3-coder:30b".

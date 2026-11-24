@@ -2,7 +2,7 @@ package instrument
 
 import "bytes"
 
-// PromptV1 is the v0.1 measurement prompt: it instructs the model to
+// PromptV1 is the measurement prompt: it instructs the model to
 // convert a specification into Go type definitions only (no
 // implementation logic), matching the protocol used in
 // docs/investigation/_sanity/gen.sh. Named and versioned (V1) because
@@ -19,7 +19,7 @@ const PromptV1 = "You convert software specifications into Go type definitions. 
 const PromptVersion = "PromptV1"
 
 // BuildPrompt concatenates PromptV1 with the spec content into the single
-// user-role message sent to the instrument. This is a v0.1 simplification:
+// user-role message sent to the instrument. This is a deliberate simplification:
 // the reference experiment (gen.sh) used a system+user message split, but
 // Generator takes one prompt string and Ollama.Generate sends only a
 // single user-role message — instrument-relativity is about fixing *some*
