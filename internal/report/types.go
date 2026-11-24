@@ -46,6 +46,10 @@ type MeasureResult struct {
 	// signal that the preflight's "errs toward refusing" guarantee may
 	// not have held for this run (issue #57).
 	PromptUnderestimated int `json:"prompt_underestimated"`
+	// Attempts is every generation attempt of the run, in order, for
+	// --keep-samples (REQ-MSR-11). json:"-" keeps the report JSON
+	// (REQ-OUT-03) unchanged.
+	Attempts []SampleRecord `json:"-"`
 }
 
 // Report is gate's unified result (@schema Report, REQ-GATE-01): it wraps
@@ -70,4 +74,22 @@ type Report struct {
 	// ExitCode == 1 (REQ-CHK-06/REQ-MSR-02). 2 is reserved for execution
 	// errors that never reach a rendered Report.
 	ExitCode int `json:"exit_code"`
+}
+
+// SampleKind classifies one generation attempt recorded for --keep-samples
+// (REQ-MSR-11).
+type SampleKind string
+
+const (
+	SampleAccepted SampleKind = "accepted" // extracted Go block that passed ValidGo
+	SampleDiscard  SampleKind = "discard"  // raw text that failed extraction or ValidGo
+	SampleTimeout  SampleKind = "timeout"  // per-request timeout; Data is the error string
+)
+
+// SampleRecord is one generation attempt. Slot and Attempt are 0-based.
+type SampleRecord struct {
+	Kind    SampleKind
+	Slot    int
+	Attempt int
+	Data    []byte
 }

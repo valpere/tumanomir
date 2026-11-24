@@ -311,3 +311,20 @@ func TestCorpusPathDefaultWhenEnabledWithoutPath(t *testing.T) {
 		t.Fatalf("CorpusPath() = %q, want default .tumanomir/corpus.jsonl", got)
 	}
 }
+
+func TestKeepSamples(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte("keep_samples: /x/y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.KeepSamples; got != "/x/y" {
+		t.Fatalf("KeepSamples = %q, want /x/y", got)
+	}
+	if got := (Config{}).KeepSamples; got != "" {
+		t.Fatalf("zero Config KeepSamples = %q, want empty", got)
+	}
+}
