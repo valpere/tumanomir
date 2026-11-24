@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/valpere/tumanomir/internal"
 )
@@ -107,7 +108,48 @@ func RenderMeasure(w io.Writer, r MeasureResult, th internal.Thresholds) error {
 	ew := &errWriter{w: w}
 	writeMeasureWarnings(ew, r)
 	writeMeasureMetrics(ew, r, th)
+	writeDecls(ew, r)
 	return ew.err
+}
+
+// writeDecls writes the opt-in `measure --decls` block (REQ-MSR-12): the
+// non-unanimous declaration slots, least agreed first, then a unanimity
+// count. Called from RenderMeasure only — RenderReport (gate) never shows it —
+// and prints nothing when Decls is empty, keeping default output unchanged
+// (REQ-OUT-01). Purely diagnostic; no verdict.
+func writeDecls(ew *errWriter, r MeasureResult) {
+	if len(r.Decls) == 0 {
+		return
+	}
+	ew.printf("\nDeclaration agreement (--decls; heuristic slot matching, diagnostic only, REQ-MSR-12):\n")
+	unanimous := 0
+	for _, d := range r.Decls {
+		if d.Present == d.N && len(d.Variants) == 1 {
+			unanimous++
+			continue
+		}
+		name := d.Name
+		if d.Parent != "" {
+			name = d.Parent + "." + name
+		}
+		shapes := make([]string, len(d.Variants))
+		for i, v := range d.Variants {
+			shapes[i] = fmt.Sprintf("%s ×%d", v.Shape, v.Count)
+		}
+		plural := "s"
+		if len(d.Variants) == 1 {
+			plural = ""
+		}
+		ew.printf("  %s %s  %d/%d present · %d shape%s: %s\n", d.Kind, name, d.Present, d.N, len(d.Variants), plural, strings.Join(shapes, " | "))
+		if len(d.NameVariants) > 0 {
+			names := make([]string, len(d.NameVariants))
+			for i, v := range d.NameVariants {
+				names[i] = fmt.Sprintf("%s ×%d", v.Name, v.Count)
+			}
+			ew.printf("    names: %s\n", strings.Join(names, ", "))
+		}
+	}
+	ew.printf("  %d of %d declarations unanimous\n", unanimous, len(r.Decls))
 }
 
 // writeMeasureWarnings writes the discard-rate (REQ-MSR-05),

@@ -548,3 +548,40 @@ func TestRenderReportBlockExitCode(t *testing.T) {
 		t.Fatalf("want the exit-code-1 line, got:\n%s", out)
 	}
 }
+
+func TestRenderMeasureDecls(t *testing.T) {
+	r := MeasureResult{
+		DPairVerdict: internal.VerdictOK,
+		Decls: []internal.DeclAgreement{
+			{Kind: "method", Parent: "Svc", Name: "Hint", Present: 9, N: 9, Variants: []internal.ShapeCount{{Shape: "(ctx)", Count: 7}, {Shape: "(ctx, string)", Count: 2}}},
+			{Kind: "type", Name: "Store", NameVariants: []internal.NameCount{{Name: "Store", Count: 2}, {Name: "SRS", Count: 1}}, Present: 3, N: 3, Variants: []internal.ShapeCount{{Shape: "interface", Count: 2}, {Shape: "struct", Count: 1}}},
+			{Kind: "func", Name: "F", Present: 9, N: 9, Variants: []internal.ShapeCount{{Shape: "()", Count: 9}}},
+		},
+	}
+	var sb strings.Builder
+	if err := RenderMeasure(&sb, r, internal.DefaultThresholds()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"method Svc.Hint  9/9 present · 2 shapes: (ctx) ×7 | (ctx, string) ×2",
+		"names: Store ×2, SRS ×1",
+		"1 of 3 declarations unanimous",
+	} {
+		if !strings.Contains(sb.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, sb.String())
+		}
+	}
+
+	// Default output and gate's report never show the block.
+	r.Decls = nil
+	var plain, gate strings.Builder
+	_ = RenderMeasure(&plain, r, internal.DefaultThresholds())
+	if strings.Contains(plain.String(), "eclaration") {
+		t.Errorf("no Decls -> no block:\n%s", plain.String())
+	}
+	r.Decls = []internal.DeclAgreement{{Kind: "func", Name: "F", Present: 1, N: 2, Variants: []internal.ShapeCount{{Shape: "()", Count: 1}}}}
+	_ = RenderReport(&gate, Report{Measure: &r}, internal.DefaultThresholds())
+	if strings.Contains(gate.String(), "eclaration") {
+		t.Errorf("RenderReport must not show decls:\n%s", gate.String())
+	}
+}

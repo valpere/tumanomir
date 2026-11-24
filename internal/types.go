@@ -218,3 +218,39 @@ type DispersionResult struct {
 	// invariants).
 	HNorm float64 `json:"h_norm"`
 }
+
+// NameCount is one spelling of a declaration name and how many samples used
+// it (REQ-MSR-12).
+type NameCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// ShapeCount is one structural shape of a declaration slot and how many
+// samples produced it (REQ-MSR-12).
+type ShapeCount struct {
+	Shape string `json:"shape"`
+	Count int    `json:"count"`
+}
+
+// DeclAgreement is the per-declaration-slot agreement of N samples
+// (REQ-MSR-12): a diagnostic showing *where* readers of a spec diverge. It
+// lives here (not in internal/dispersion) because internal/report renders it
+// and must not import dispersion. Heuristic slot matching, not a measurement.
+type DeclAgreement struct {
+	// Kind is "type", "field", "method" or "func".
+	Kind string `json:"kind"`
+	// Parent is the owning type slot's label for fields/methods; empty
+	// otherwise.
+	Parent string `json:"parent,omitempty"`
+	// Name is the slot label: the most frequent spelling.
+	Name string `json:"name"`
+	// NameVariants lists every spelling (including the label) only when more
+	// than one was used.
+	NameVariants []NameCount `json:"name_variants,omitempty"`
+	// Present is how many of the N samples declare this slot.
+	Present int `json:"present"`
+	N       int `json:"n"`
+	// Variants are the distinct shapes, most common first.
+	Variants []ShapeCount `json:"variants"`
+}

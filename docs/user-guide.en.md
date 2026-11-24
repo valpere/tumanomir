@@ -204,6 +204,22 @@ Config: top-level `keep_samples: <dir>`; the flag overrides it and
 `--keep-samples=` disables it. Works on `gate` too (an explicit flag with no
 instrument is the REQ-GATE-02 error).
 
+`--decls` (`measure` only, opt-in, REQ-MSR-12) shows *where* the N accepted
+samples diverge, not just how much: after the normal output it prints a
+"Declaration agreement" block listing the non-unanimous declaration slots
+(type/field/method/func), least agreed first, plus a `K of M declarations
+unanimous` line. Example line: `method SessionService.Hint  9/9 present · 2
+shapes: (context.Context) (string, error) ×7 | (context.Context, string)
+(string, error) ×2`. It is purely diagnostic: no new metric or gate, D_pair/H
+and the exit code are unchanged, and `gate` has no such flag. A slot's shape
+is its type-only signature (parameter names dropped, grouped parameters
+expanded, local type names rewritten to the slot label), so renames create
+no variants. Slot matching is a **heuristic** (types: case-insensitive name,
+then Jaccard of member/enum-value sets >= 0.5 with >= 2 shared), not a
+measurement; *field* renames (`WeakTags` / `WeakestTags`) are not matched in
+v1 and show up as two partly-present slots. With `--format json` the result
+carries a `decls` array.
+
 **The discard counter and the >40% warning (REQ-MSR-05).** Each sample
 gets up to 3 attempts (1 initial + 2 retries); if none produce valid Go,
 the sample is discarded — the count is never hidden. A per-request

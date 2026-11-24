@@ -118,6 +118,12 @@ instrument-dependent, not a universal floor guaranteed by the metric — a
 different or weaker model might not reach zero entropy even on a fully
 unambiguous spec.
 
+`measure --decls` (per-declaration agreement) is a heuristic diagnostic, not
+a measurement: declarations are matched into slots by name and by
+member/enum-value overlap (Jaccard >= 0.5, >= 2 shared elements), so a slot
+split or merge is possible. Field renames (`WeakTags` / `WeakestTags`) are
+not matched in v1 and appear as two partly-present slots.
+
 ## Contributing
 
 Issues, bug reports, and pull requests are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).

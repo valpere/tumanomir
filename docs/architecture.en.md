@@ -93,6 +93,8 @@ tumanomir version                       # print version and exit
 --num-predict    int     required: max generated tokens; must exceed natural output length
 --think          bool    enable reasoning-model think mode (default false)
 --d-pair-max     float   gate: max 1 − mean pairwise AST similarity (default 0.30)
+--decls          bool    measure only; opt-in: per-declaration agreement report
+                          (diagnostic, no metric or gate; REQ-MSR-12)
 --timeout        duration per-request timeout against the backend, e.g. 10m
                           (default 5m); raise for slow/CPU-bound local models
                           (REQ-MSR-10)
@@ -161,7 +163,7 @@ internal/types.go       shared types (Verdict, Thresholds, InstrumentConfig,
 internal/config/        loads .tumanomir.yaml (REQ-CFG-02/03)
 internal/spec/          markdown specification loading (file or directory)
 internal/metrics/       K_drift (traceability linter), D_const (lexical scanner)
-internal/dispersion/    AST features, cosine, single-linkage, entropy, D_pair
+internal/dispersion/    AST features, cosine, single-linkage, entropy, D_pair; Decls — diagnostic per-declaration agreement (REQ-MSR-12)
 internal/instrument/    Generator interface, Ollama backend, PromptV1 + fence extractor
 internal/report/        renders CheckResult/MeasureResult/Report into a TTY report (REQ-OUT-01)
 internal/calibrate/     corpus-based Spearman correlation + median split for `calibrate` (REQ-CAL-01..05)
