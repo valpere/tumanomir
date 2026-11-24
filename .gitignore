@@ -48,6 +48,7 @@ tmp/
 .claude/sessions.db
 .claude/sessions.db-shm
 .claude/sessions.db-wal
+.claude/sessions.db.v2-backup-*
 .claude/session-log.md
 .claude/session-checkpoint.json
 .claude/session-checkpoint.json.lock
