@@ -172,7 +172,14 @@ measure: generation failed: instrument: estimated prompt tokens (427, len(prompt
 ```
 
 `-n`/`--samples` must be `>= 2` (a pair is needed for pairwise
-similarity). `--sim-threshold` is the single-linkage clustering threshold
+similarity). The default N=10 is enough for a first look, but too few to compare
+two revisions of a spec. In one measured case (README §Limitations) the
+run-to-run spread at N=10 was ±0.03 and the 95% CI was about 0.10 wide;
+at N≥20 the CI narrowed to 0.05–0.06. To compare revisions, use N ≥ 20.
+A difference smaller than the CI width is not evidence of a change. Do
+not read non-overlapping CIs as a significance test either: the CI is
+advisory, the numbers are instrument-relative, and the thresholds stay
+hypotheses. `--sim-threshold` is the single-linkage clustering threshold
 for H/H_norm, default 0.95.
 
 `--timeout` bounds each individual HTTP request to the backend (default

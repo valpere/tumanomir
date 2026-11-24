@@ -118,6 +118,25 @@ instrument-dependent, not a universal floor guaranteed by the metric — a
 different or weaker model might not reach zero entropy even on a fully
 unambiguous spec.
 
+**N=10 cannot separate nearby specs** (one instrument, one spec family; not a
+general law). Two dreet-dojo `req-uc` revisions (`32cc10f`, `58504a8`) were
+measured with `gemma4:31b-cloud` at temp 1.0. A field run reported a jump
+from 0.19 to 0.25 between them. At larger N that jump disappears:
+
+| revision | N=10 | N=20 | N=30 |
+|---|---|---|---|
+| `32cc10f` | 0.234 [0.183, 0.280] | 0.211 [0.186, 0.236] | 0.220 [0.194, 0.242] |
+| `58504a8` | 0.211 [0.158, 0.264] | 0.235 [0.207, 0.263] | 0.216 [0.186, 0.245] |
+
+At N=30 both revisions sit at about 0.22, and their 95% CIs overlap fully.
+The CI is about 0.10–0.11 wide at N=10 and about 0.05–0.06 wide at both N=20
+and N=30. The same `32cc10f` spec gave D_pair between 0.18 and 0.24 across
+four N=10 runs: the dreet-dojo field run (0.19), the two #163 acceptance
+runs (0.18 and 0.24) and this table's run (0.234). Only the table's run has
+kept samples. A difference smaller than the CI width is therefore not
+evidence that a spec changed. To compare revisions, use N ≥ 20 (see the
+user's guide).
+
 `measure --decls` (per-declaration agreement) is a heuristic diagnostic, not
 a measurement: declarations are matched into slots by name and by
 member/enum-value overlap (Jaccard >= 0.5, >= 2 shared elements), so a slot
