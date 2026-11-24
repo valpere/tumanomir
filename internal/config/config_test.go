@@ -321,10 +321,10 @@ func TestKeepSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.KeepSamples(); got != "/x/y" {
-		t.Fatalf("KeepSamples() = %q, want /x/y", got)
+	if got := c.KeepSamples; got != "/x/y" {
+		t.Fatalf("KeepSamples = %q, want /x/y", got)
 	}
-	if got := (Config{}).KeepSamples(); got != "" {
-		t.Fatalf("zero Config KeepSamples() = %q, want empty", got)
+	if got := (Config{}).KeepSamples; got != "" {
+		t.Fatalf("zero Config KeepSamples = %q, want empty", got)
 	}
 }

@@ -568,7 +568,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
-	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples(), "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
+	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples, "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("measure", formatFlag) {
@@ -883,7 +883,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
-	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples(), "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
+	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples, "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("gate", formatFlag) {

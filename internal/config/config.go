@@ -25,10 +25,10 @@ type Config struct {
 	Thresholds *Thresholds `yaml:"thresholds"`
 	Instrument *Instrument `yaml:"instrument"`
 	Corpus     *Corpus     `yaml:"corpus"`
-	// KeepSamples is the default for --keep-samples (REQ-MSR-11). Top-level
+	// KeepSamples is the default for --keep-samples (REQ-MSR-11); "" is off. Top-level
 	// and outside Instrument on purpose: it is not part of the instrument
 	// identity (REQ-MSR-04) and must not reach the printed config.
-	KeepDir *string `yaml:"keep_samples"`
+	KeepSamples string `yaml:"keep_samples"`
 }
 
 // Thresholds is the config-file counterpart of internal.Thresholds.
@@ -178,12 +178,4 @@ func (c Config) CorpusPath() string {
 		return *c.Corpus.Path
 	}
 	return ".tumanomir/corpus.jsonl"
-}
-
-// KeepSamples returns the configured --keep-samples directory, or "" (off).
-func (c Config) KeepSamples() string {
-	if c.KeepDir == nil {
-		return ""
-	}
-	return *c.KeepDir
 }
