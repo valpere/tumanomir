@@ -326,7 +326,7 @@ func TestDeclsFixtureRender(t *testing.T) {
 	// Reference numbers pinned in testdata/dreet-dojo-req-uc-32cc10f/README.md
 	// (this fixture's own, not the measured run's reported 0.19).
 	for name, c := range map[string][2]float64{
-		"D_pair": {res.DPair, 0.2462}, "CI low": {res.DPairCILow, 0.1554}, "CI high": {res.DPairCIHigh, 0.2616},
+		"D_pair": {res.DPair, 0.2462}, "CI low": {res.DPairCILow, 0.1895}, "CI high": {res.DPairCIHigh, 0.2972},
 		"H": {res.H, 3.1699}, "clusters": {float64(res.Clusters), 9},
 	} {
 		if math.Abs(c[0]-c[1]) > 5e-4 {

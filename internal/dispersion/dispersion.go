@@ -17,10 +17,11 @@ import (
 // there is no pair to compare — return early with just N populated;
 // (3) compute the full pairwise cosine-similarity matrix; (4) MeanSim/DPair
 // come directly off that matrix, independent of simThreshold; (5) DPairCILow/
-// DPairCIHigh bootstrap a 95% CI around DPair (REQ-MSR-07), advisory only —
-// same status as H/HNorm below, never gated; (6) H/HNorm additionally
-// cluster the matrix at simThreshold and take entropy over cluster sizes —
-// this is the only place simThreshold affects the result.
+// DPairCIHigh bootstrap a 95% CI around DPair (REQ-MSR-07) by resampling
+// indices into that matrix and scoring only distinct-original-index pairs,
+// advisory only — same status as H/HNorm below, never gated; (6) H/HNorm
+// additionally cluster the matrix at simThreshold and take entropy over
+// cluster sizes — this is the only place simThreshold affects the result.
 func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 	res := internal.DispersionResult{SimThresh: simThreshold}
 
@@ -43,11 +44,29 @@ func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 		return res
 	}
 
-	// sims is the full symmetric N×N pairwise similarity matrix (diagonal
-	// left at its zero value — a sample's similarity to itself is never
-	// read by anything downstream). Built once and reused by both the
-	// MeanSim/DPair sum below and singleLinkage's clustering.
-	sims := make([][]float64, n)
+	// sims is built once and reused by the bootstrap CI and singleLinkage's
+	// clustering, alongside the MeanSim/DPair figures.
+	sims, meanSim := pairwiseSims(feats)
+	res.MeanSim = meanSim
+	res.DPair = 1 - res.MeanSim
+	res.DPairCILow, res.DPairCIHigh = bootstrapDPairCI(sims, res.DPair, bootstrapCIB, bootstrapCISeed)
+	res.H, res.Clusters = entropy(singleLinkage(sims, simThreshold))
+	// HNorm normalizes H by the maximum possible entropy for N samples
+	// (all N in separate singleton clusters, i.e. log2(N) bits) so H
+	// values are comparable across runs with different N — raw H alone
+	// saturates at log2(N) and so can't be compared directly between e.g.
+	// an N=10 and an N=20 run.
+	res.HNorm = res.H / math.Log2(float64(n))
+	return res
+}
+
+// pairwiseSims returns the full symmetric N×N cosine-similarity matrix over
+// feats (diagonal left at its zero value — a sample's similarity to itself is
+// never read by anything downstream) and the mean similarity over all
+// distinct pairs. Requires len(feats) >= 2.
+func pairwiseSims(feats []map[string]float64) (sims [][]float64, meanSim float64) {
+	n := len(feats)
+	sims = make([][]float64, n)
 	for i := range sims {
 		sims[i] = make([]float64, n)
 	}
@@ -61,18 +80,7 @@ func Analyze(sources [][]byte, simThreshold float64) internal.DispersionResult {
 			pairs++
 		}
 	}
-
-	res.MeanSim = sum / float64(pairs)
-	res.DPair = 1 - res.MeanSim
-	res.DPairCILow, res.DPairCIHigh = bootstrapDPairCI(feats, bootstrapCIB, bootstrapCISeed)
-	res.H, res.Clusters = entropy(singleLinkage(sims, simThreshold))
-	// HNorm normalizes H by the maximum possible entropy for N samples
-	// (all N in separate singleton clusters, i.e. log2(N) bits) so H
-	// values are comparable across runs with different N — raw H alone
-	// saturates at log2(N) and so can't be compared directly between e.g.
-	// an N=10 and an N=20 run.
-	res.HNorm = res.H / math.Log2(float64(n))
-	return res
+	return sims, sum / float64(pairs)
 }
 
 // ValidGo reports whether src parses as a Go file with at least one
