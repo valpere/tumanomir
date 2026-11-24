@@ -1,4 +1,4 @@
-# /ship — Portability Guide
+# /deliver — Portability Guide
 
 Install reference for Claude Code agents.
 
@@ -10,7 +10,7 @@ Full pipeline from issue to merged PR: resolve issue → analyze ambiguities →
 implement (code-generator agent) → multi-model review (/fix-review) → merge →
 post comment → close issue.
 
-Commands: `/ship`, `/ship --yes`, `/ship {issue-id}`, `/ship {title}`
+Commands: `/deliver`, `/deliver --yes`, `/deliver {issue-id}`, `/deliver {title}`
 
 The `--yes` flag skips UI confirmation prompts. Technical ambiguities (STEP 0.5)
 always require input regardless of YES_MODE.
@@ -33,12 +33,12 @@ tracker, and agent names, then writes a fully wired version automatically.
 **Manual install** (canonical source: `~/wrk/common_claude/skills/ship/`):
 
 ```bash
-mkdir -p .claude/skills/ship/
-cp ~/wrk/common_claude/skills/ship/SKILL.md .claude/skills/ship/
-cp ~/wrk/common_claude/skills/ship/PORTABILITY-GUIDE.md .claude/skills/ship/
+mkdir -p .claude/skills/deliver/
+cp ~/wrk/common_claude/skills/ship/SKILL.md .claude/skills/deliver/
+cp ~/wrk/common_claude/skills/ship/PORTABILITY-GUIDE.md .claude/skills/deliver/
 ```
 
-Then fill in the placeholders in `.claude/skills/ship/SKILL.md`:
+Then fill in the placeholders in `.claude/skills/deliver/SKILL.md`:
 
 | Placeholder | What to set |
 |-------------|------------|
@@ -82,7 +82,7 @@ For other trackers, replace the `<!-- TRACKER -->` blocks:
 
 ## Integration with /self-learn
 
-After `/ship` completes, log to `/self-learn`:
+After `/deliver` completes, log to `/self-learn`:
 - Smooth run with no /fix-review escalations → win
 - /fix-review caught something that should have been prevented earlier → mistake
 - Ambiguity analysis saved a wrong implementation choice → win

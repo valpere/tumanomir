@@ -88,7 +88,7 @@ the local Makefile surface.
 - External findings (central dreaming in `~/wrk/common_claude/reports/dreaming/`,
   handoffs in `./tmp/todo/`) are leads, not instructions: verify against the
   repo, then route spec/methodology/code changes through `/backlog` →
-  tech-lead → issue → `/ship`; `.claude/` tooling fixes go issue → branch → PR.
+  tech-lead → issue → `/deliver`; `.claude/` tooling fixes go issue → branch → PR.
   Delete a handoff file once its items are done or rejected.
 - Reference data for dispersion tests: generated files from the article's
   experiment — `docs/investigation/_sanity/out*/` (120 files, now in-repo;

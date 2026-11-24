@@ -1,6 +1,6 @@
 ---
 name: fix-review
-description: "tumanomir (valpere/tumanomir) multi-model PR review with parallel fan-out. Provider: Ollama cloud (glm-5.3, deepseek-v4.1-flash, kimi-k2.6) primary, external-agent CLIs (cursor-agent/agy/omp/codex/opencode/kilo/kiro-cli) tier-2 failover, Ollama local tier-3. Claude acts as Arbiter — confirms, escalates, or dismisses findings using vote count as confidence signal. Applies a single consolidated fix commit. Does NOT merge — /ship owns the merge. Usage: /fix-review [PR-number]"
+description: "tumanomir (valpere/tumanomir) multi-model PR review with parallel fan-out. Provider: Ollama cloud (glm-5.3, deepseek-v4.1-flash, kimi-k2.6) primary, external-agent CLIs (cursor-agent/agy/omp/codex/opencode/kilo/kiro-cli) tier-2 failover, Ollama local tier-3. Claude acts as Arbiter — confirms, escalates, or dismisses findings using vote count as confidence signal. Applies a single consolidated fix commit. Does NOT merge — /deliver owns the merge. Usage: /fix-review [PR-number]"
 ---
 
 # Skill: /fix-review (parallel)
@@ -31,7 +31,7 @@ diff ───┼─→ Round 2 (deepseek-v4.1-flash)  ┼─→ aggregate (dedu
 The arbiter handles dedup; in practice most "R2 reacted to R1's fix" cases were
 just the second model lagging.
 
-**Merge:** this project runs `/ship`, which owns the merge (its STEP 3). `/fix-review`
+**Merge:** this project runs `/deliver`, which owns the merge (its STEP 3). `/fix-review`
 here **never merges** — see STEP 10.
 
 ---
@@ -548,9 +548,9 @@ Cost is always 0 — all configured models are Ollama cloud/local (free tier).
 
 ---
 
-## STEP 10: Gate Check (no merge — /ship owns merging)
+## STEP 10: Gate Check (no merge — /deliver owns merging)
 
-This project runs `/ship`, which owns the merge step. `/fix-review` **never
+This project runs `/deliver`, which owns the merge step. `/fix-review` **never
 calls `gh pr merge`**. It only computes and reports gate status:
 
 ```bash
@@ -563,7 +563,7 @@ READY="yes"
 [ "$HAS_REVERT" = "yes" ]       && READY="no"
 [ "$GATES_OK"  != "yes" ]       && READY="no"
 
-echo "Ready for /ship to merge: ${READY}"
+echo "Ready for /deliver to merge: ${READY}"
 [ "$READY" = "no" ] && echo "  Blocking: mergeable=${MERGEABLE} revert=${HAS_REVERT} gates=${GATES_OK}"
 ```
 
@@ -597,7 +597,7 @@ Lint:  ${LINT_RESULT}
 
 Commit: ${COMMIT_SHA}
 PR:     ${PR_URL}
-Ready for /ship to merge: ${READY}
+Ready for /deliver to merge: ${READY}
 Telemetry: ${TELEMETRY_FILE}
 ```
 
