@@ -17,7 +17,8 @@ import (
 
 // Write creates a fresh run directory under root and writes the run's
 // accepted Go blocks (NN.go, in Analyze order), discarded and timed-out
-// attempts, and instrument.json. It returns the run directory.
+// attempts, and instrument.json. It returns the run directory. On any
+// failure the partial run dir is removed, so a kept dir is always complete.
 //
 // WHY: os.MkdirTemp gives every run its own directory, so a rerun with the
 // same spec and instrument can never overwrite or mix with earlier files.
@@ -39,6 +40,14 @@ func Write(root string, specContent []byte, mr report.MeasureResult) (string, er
 		return "", err
 	}
 
+	if err := writeRun(dir, mr, cfgJSON); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
+
+func writeRun(dir string, mr report.MeasureResult, cfgJSON []byte) error {
 	width := max(2, len(strconv.Itoa(mr.Config.Samples-1)))
 	write := func(name string, data []byte) error {
 		return os.WriteFile(filepath.Join(dir, name), data, 0o644)
@@ -54,10 +63,12 @@ func Write(root string, specContent []byte, mr report.MeasureResult) (string, er
 			name = fmt.Sprintf("s%0*d-a%d.discard.txt", width, r.Slot, r.Attempt)
 		case report.SampleTimeout:
 			name = fmt.Sprintf("s%0*d-a%d.timeout.txt", width, r.Slot, r.Attempt)
+		default:
+			return fmt.Errorf("unknown sample kind %q", r.Kind)
 		}
 		if err := write(name, r.Data); err != nil {
-			return dir, err
+			return err
 		}
 	}
-	return dir, write("instrument.json", append(cfgJSON, '\n'))
+	return write("instrument.json", append(cfgJSON, '\n'))
 }

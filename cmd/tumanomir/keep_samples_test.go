@@ -66,12 +66,9 @@ func runKeep(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
 	chdir(t, t.TempDir()) // no ambient .tumanomir.yaml
 	full := append(append([]string{}, keepBase...), args...)
-	return func() (string, string, int) {
-		so, se, code := captureBoth(t, func() int {
-			return runMeasureImpl(full, func(internal.InstrumentConfig) instrument.Generator { return keepFake() })
-		})
-		return so, se, code
-	}()
+	return captureBoth(t, func() int {
+		return runMeasureImpl(full, func(internal.InstrumentConfig) instrument.Generator { return keepFake() })
+	})
 }
 
 func TestKeepSamplesOffWritesNothingAndStdoutUnchanged(t *testing.T) {
@@ -125,7 +122,10 @@ func TestKeepSamplesContentsAndReanalysis(t *testing.T) {
 	if rep.Result.Dispersion.Discarded != 1 {
 		t.Fatalf("discarded = %d, want 1", rep.Result.Dispersion.Discarded)
 	}
-	b, _ := os.ReadFile(filepath.Join(run, "instrument.json"))
+	b, err := os.ReadFile(filepath.Join(run, "instrument.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var cfg internal.InstrumentConfig
 	if err := json.Unmarshal(b, &cfg); err != nil || !reflect.DeepEqual(cfg, rep.Result.Config) {
 		t.Fatalf("instrument.json %+v (err %v) != report config %+v", cfg, err, rep.Result.Config)
@@ -134,7 +134,10 @@ func TestKeepSamplesContentsAndReanalysis(t *testing.T) {
 	var srcs [][]byte
 	for _, n := range listDir(t, run) {
 		if strings.HasSuffix(n, ".go") {
-			s, _ := os.ReadFile(filepath.Join(run, n))
+			s, err := os.ReadFile(filepath.Join(run, n))
+			if err != nil {
+				t.Fatal(err)
+			}
 			srcs = append(srcs, s)
 		}
 	}
@@ -258,5 +261,26 @@ func TestGateKeepSamplesWithoutInstrumentIsContradiction(t *testing.T) {
 	})
 	if code != 2 || !strings.Contains(errOut, "--keep-samples") || !strings.Contains(errOut, "REQ-GATE-02") {
 		t.Fatalf("code=%d stderr=%q", code, errOut)
+	}
+}
+
+// REQ-MSR-11: files are written even when D_pair is skipped (<2 valid).
+func TestKeepSamplesWrittenOnSkippedVerdict(t *testing.T) {
+	spec := keepSpec(t)
+	root := t.TempDir()
+	chdir(t, t.TempDir())
+	args := append(append([]string{}, keepBase...), "--keep-samples", root, spec)
+	_, code := captureStderr(t, func() int {
+		return runMeasureImpl(args, func(internal.InstrumentConfig) instrument.Generator {
+			return &fakeGenerator{fn: func(int) (instrument.Generation, error) { return genOK([]byte("no go here")) }}
+		})
+	})
+	runs := listDir(t, root)
+	if code != 0 || len(runs) != 1 {
+		t.Fatalf("code=%d runs=%v", code, runs)
+	}
+	files := listDir(t, filepath.Join(root, runs[0]))
+	if len(files) != 4*3+1 || files[len(files)-1] != "s03-a2.discard.txt" {
+		t.Fatalf("files = %v, want 12 discards + instrument.json", files)
 	}
 }

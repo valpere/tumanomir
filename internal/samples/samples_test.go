@@ -122,3 +122,17 @@ func TestWriteUnwritableRootErrors(t *testing.T) {
 		t.Fatal("want error when root is under a regular file")
 	}
 }
+
+// A failed write must not leave a partial run dir that looks like a
+// complete audit trail; an unknown Kind is such a failure.
+func TestWriteFailureRemovesPartialRun(t *testing.T) {
+	root := t.TempDir()
+	mr := fixture()
+	mr.Attempts = append(mr.Attempts, report.SampleRecord{Kind: "bogus"})
+	if _, err := Write(root, []byte("spec"), mr); err == nil {
+		t.Fatal("want error for unknown SampleKind")
+	}
+	if got := names(t, root); len(got) != 0 {
+		t.Fatalf("partial run left behind: %v", got)
+	}
+}

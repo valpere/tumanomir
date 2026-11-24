@@ -308,7 +308,8 @@ for exactly that reason.
     D_pair verdict; nothing is written when generation hard-fails. The
     created path goes to stderr and stdout/JSON are unchanged. A write
     failure is a stderr warning and never changes the exit code (the
-    REQ-MSR-08 policy). On `gate`, an explicit `--keep-samples` with no
+    REQ-MSR-08 policy); the partial run directory is removed, so a kept
+    directory is always complete. On `gate`, an explicit `--keep-samples` with no
     resolved instrument is the REQ-GATE-02 contradiction. The setting is
     not part of InstrumentConfig, the printed config or the corpus
     instrument string (REQ-MSR-04).
