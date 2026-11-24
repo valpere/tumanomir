@@ -897,6 +897,11 @@ func TestRunMeasureFlagValidation(t *testing.T) {
 			if errOut == "" {
 				t.Fatal("want a non-empty actionable stderr message")
 			}
+			// Usage errors describe current behaviour; a hardcoded release
+			// number goes stale on the next bump (issue #183).
+			if strings.Contains(errOut, "v0.") {
+				t.Fatalf("stderr names a release version; want version-neutral wording:\n%s", errOut)
+			}
 		})
 	}
 }
@@ -1608,6 +1613,10 @@ func TestRunGateImplDirectoryArgumentRejected(t *testing.T) {
 	}
 	if errOut == "" {
 		t.Fatal("want a non-empty actionable stderr message")
+	}
+	// Same version-neutral guard as TestRunMeasureFlagValidation (issue #183).
+	if strings.Contains(errOut, "v0.") {
+		t.Fatalf("stderr names a release version; want version-neutral wording:\n%s", errOut)
 	}
 }
 

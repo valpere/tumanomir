@@ -488,7 +488,7 @@ func validateMeasureFlags(cmdName, instrumentFlag string, samples int, simThresh
 		return "", "", false
 	}
 	if backend != "ollama" {
-		fmt.Fprintf(os.Stderr, "%s: unsupported backend %q; v0.1 supports only \"ollama\"\n", cmdName, backend)
+		fmt.Fprintf(os.Stderr, "%s: unsupported backend %q; only \"ollama\" is supported\n", cmdName, backend)
 		return "", "", false
 	}
 
@@ -530,7 +530,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fileCfg.ApplyThresholds(&th)
 
 	// Seed the instrument flag defaults from the config file, layered over
-	// v0.1's built-in defaults — mirrors runCheck's th/ApplyThresholds
+	// the built-in defaults — mirrors runCheck's th/ApplyThresholds
 	// seeding, but per-field rather than via a single struct pointer since
 	// these flags aren't backed by one InstrumentConfig variable.
 	seeded, err := fileCfg.InstrumentOr(internal.InstrumentConfig{Temperature: 1.0, Samples: 10, SimThreshold: 0.95, Timeout: instrument.DefaultTimeout})
@@ -602,7 +602,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		return 2
 	}
 	if info.IsDir() {
-		fmt.Fprintf(os.Stderr, "measure: %s is a directory; measure takes a single spec file (directory aggregation is not methodologically meaningful for dispersion measurement in v0.1)\n", path)
+		fmt.Fprintf(os.Stderr, "measure: %s is a directory; measure takes a single spec file (directory aggregation is not methodologically meaningful for dispersion measurement)\n", path)
 		return 2
 	}
 	specContent, err := os.ReadFile(path)
@@ -625,7 +625,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		PromptVersion: instrument.PromptVersion,
 	}
 
-	// v0.1 ships only "ollama"; already validated above. Future backends
+	// Only "ollama" exists today; already validated above. Future backends
 	// would switch on cfg.Backend here.
 	gen := newGen(cfg)
 
@@ -921,7 +921,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 		return 2
 	}
 	if info.IsDir() {
-		fmt.Fprintf(os.Stderr, "gate: %s is a directory; gate takes a single spec file (directory aggregation is not methodologically meaningful for dispersion measurement in v0.1)\n", path)
+		fmt.Fprintf(os.Stderr, "gate: %s is a directory; gate takes a single spec file (directory aggregation is not methodologically meaningful for dispersion measurement)\n", path)
 		return 2
 	}
 
@@ -966,7 +966,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 			PromptVersion: instrument.PromptVersion,
 		}
 
-		// v0.1 ships only "ollama"; already validated above. Future backends
+		// Only "ollama" exists today; already validated above. Future backends
 		// would switch on cfg.Backend here.
 		gen := newGen(cfg)
 

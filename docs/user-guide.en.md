@@ -489,7 +489,7 @@ row — including any malformed line `LoadCorpus` would itself skip —
 written back out unchanged) is atomic: a temp file in the corpus file's
 own directory, then renamed over the original, so a crash or write
 failure mid-rewrite never leaves a truncated corpus file. There is no
-file locking in v0.1 — running `measure --corpus` and `label` against
+file locking — running `measure --corpus` and `label` against
 the same file concurrently is last-writer-wins, the same single-user-CLI
 stance `measure --corpus`'s dedup already takes; not a concern for a
 single person's own workflow.
@@ -508,7 +508,7 @@ thresholds:
   d_const_min: 0.35    # float, [0,1]
   d_pair_max: 0.30     # float, [0,1]
 instrument:
-  backend: ollama       # v0.1: "ollama" only
+  backend: ollama       # currently "ollama" only
   model: qwen3-coder:30b
   temperature: 1.0
   samples: 10           # int, >= 2
@@ -664,7 +664,7 @@ while writing this guide), not a paraphrase.
 | Message | Cause | Fix |
 | --- | --- | --- |
 | `measure: --instrument is required, format backend:model (e.g. ollama:qwen3-coder:30b)` | `measure` without `--instrument` | add `--instrument backend:model` |
-| `measure: unsupported backend "openai"; v0.1 supports only "ollama"` | a backend other than `ollama` | v0.1 only supports `ollama` (other instruments are on the roadmap) |
+| `measure: unsupported backend "openai"; only "ollama" is supported` | a backend other than `ollama` | Only `ollama` is supported (other instruments are on the roadmap) |
 | `measure: --num-ctx is required (must exceed the prompt token count)` | `--num-ctx` not passed (or `<= 0`) | add `--num-ctx <N>` with headroom over the prompt size |
 | `measure: generation failed: instrument: estimated prompt tokens (427, ...) + num_predict (2048) exceeds num_ctx (100); increase num_ctx or reduce num_predict` | the preflight check (REQ-MSR-06): prompt + `num_predict` don't fit `num_ctx` | raise `--num-ctx` or lower `--num-predict` |
 | `measure: generation failed: instrument: ollama request failed: ... context deadline exceeded ... (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)` | the request exceeded `--timeout` (default 5m, REQ-MSR-10) — slow/CPU-bound local model, or too large a `--num-ctx`/`--num-predict` | raise `--timeout` (e.g. `--timeout 15m`), lower `--num-ctx`/`--num-predict`, or use a faster instrument |

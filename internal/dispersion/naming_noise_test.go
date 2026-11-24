@@ -25,8 +25,8 @@ import (
 // The naming-noise D_pair of ~0.67 means two-thirds of the similarity
 // space is consumed by identifier-choice alone when the structural
 // interpretation is held fixed — a significant fraction of D_pair's
-// signal on empty-body type skeletons (PromptV1's only generation target
-// in v0.1) is naming-style noise, not structural divergence. This number
+// signal on empty-body type skeletons (PromptV1's only generation
+// target) is naming-style noise, not structural divergence. This number
 // is the input to a future Phase 2 go/no-go decision on whether to add
 // an additive, non-gating D_pair_shape diagnostic (identifier-
 // canonicalized feature keys). That decision was made separately —

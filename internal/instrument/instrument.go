@@ -47,7 +47,7 @@ type Generation struct {
 	DoneReason string
 }
 
-// Generator is the pluggable instrument interface. v0.1 ships one backend,
+// Generator is the pluggable instrument interface. Currently one backend ships,
 // Ollama (see ollama.go); implementations must honor the instrument
 // configuration's think/num_ctx/num_predict fields exactly — these are
 // measurement-integrity requirements, not defaults to optimize away.

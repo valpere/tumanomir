@@ -489,7 +489,7 @@ REQ-CAL-04 вже застосовує до `outcome` — значення по�
 пропустила б, — пишуться назад без змін) — атомарний: тимчасовий файл
 у тій самій директорії, що й файл корпусу, потім перейменований поверх
 оригіналу, тож збій чи помилка запису під час перезапису ніколи не
-залишає обрізаний файл корпусу. У v0.1 немає файлових блокувань —
+залишає обрізаний файл корпусу. Файлових блокувань немає —
 паралельний запуск `measure --corpus` і `label` над одним файлом —
 last-writer-wins, та сама позиція single-user CLI, яку вже займає дедуп
 `measure --corpus`; не проблема для робочого процесу однієї людини.
@@ -508,7 +508,7 @@ thresholds:
   d_const_min: 0.35    # float, [0,1]
   d_pair_max: 0.30     # float, [0,1]
 instrument:
-  backend: ollama       # v0.1: тільки "ollama"
+  backend: ollama       # наразі тільки "ollama"
   model: qwen3-coder:30b
   temperature: 1.0
   samples: 10           # int, >= 2
@@ -665,7 +665,7 @@ downstream-результат), якого на старті проєкту ще
 | Повідомлення | Причина | Виправлення |
 | --- | --- | --- |
 | `measure: --instrument is required, format backend:model (e.g. ollama:qwen3-coder:30b)` | `measure` без `--instrument` | додайте `--instrument backend:model` |
-| `measure: unsupported backend "openai"; v0.1 supports only "ollama"` | backend, відмінний від `ollama` | v0.1 підтримує лише `ollama` (roadmap: інші прилади) |
+| `measure: unsupported backend "openai"; only "ollama" is supported` | backend, відмінний від `ollama` | Наразі підтримується лише `ollama` (roadmap: інші прилади) |
 | `measure: --num-ctx is required (must exceed the prompt token count)` | не передано `--num-ctx` (або `<= 0`) | додайте `--num-ctx <N>` з запасом над розміром промпту |
 | `measure: generation failed: instrument: estimated prompt tokens (427, ...) + num_predict (2048) exceeds num_ctx (100); increase num_ctx or reduce num_predict` | preflight-перевірка (REQ-MSR-06): промпт + `num_predict` не влазять у `num_ctx` | збільшіть `--num-ctx` або зменшіть `--num-predict` |
 | `measure: generation failed: instrument: ollama request failed: ... context deadline exceeded ... (raise --timeout, lower --num-ctx/--num-predict, or use a faster instrument)` | запит перевищив `--timeout` (дефолт 5m, REQ-MSR-10) — повільна/CPU-bound локальна модель, або завеликі `--num-ctx`/`--num-predict` | збільшіть `--timeout` (напр. `--timeout 15m`), зменшіть `--num-ctx`/`--num-predict`, або оберіть швидший прилад |

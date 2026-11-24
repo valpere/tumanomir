@@ -78,7 +78,7 @@ Check every item against every changed file:
   methodology's core claim depends on invalid rate being visible, never
   swallowed into a silently-smaller sample.
 
-> No React/TS, Node/Express surface in this repo (Go, stdlib-only except gopkg.in/yaml.v3, v0.1) —
+> No React/TS, Node/Express surface in this repo (Go, stdlib-only except gopkg.in/yaml.v3) —
 > those generic checklists are omitted.
 
 ---

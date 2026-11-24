@@ -130,7 +130,7 @@ for exactly that reason.
    -> [FUN-MSR-02] DispersionResult{H, HNorm, Clusters, SimThresh}
 
 9. [REQ-MSR-03] Generation must go through a pluggable instrument
-   interface; v0.1 ships one backend: Ollama chat API.
+   interface; currently one backend ships: Ollama chat API.
    -> [FUN-MSR-03] instrument.Generator interface; instrument.Ollama
 
 10. [REQ-MSR-04] The full instrument configuration (backend, model,
@@ -153,7 +153,7 @@ for exactly that reason.
     not a calibrated constant, the same treatment given to the 0.20/0.35/0.30
     thresholds elsewhere in this document (see REQ-CFG-01). This is a warning
     signal only, not a new gate: it implies no exit-code change, consistent
-    with D_pair/H_norm staying ordinal/advisory in v0.1.
+    with D_pair/H_norm staying ordinal/advisory.
 
     A per-request timeout (REQ-MSR-10's `--timeout`) on one attempt is
     treated as an invalid attempt for that sample slot, sharing this same
@@ -266,7 +266,7 @@ for exactly that reason.
     malformed/unparseable line `LoadCorpus` itself would skip, must
     round-trip byte-for-byte unchanged, never dropped. Concurrent
     `measure`/`label` invocations against the same corpus file are
-    explicitly **not** locked in v0.1 — last-writer-wins, the same
+    explicitly **not** locked — last-writer-wins, the same
     single-user-CLI stance REQ-MSR-08's `AppendRow` already takes; a real
     file-locking scheme is future work if that assumption stops holding.
     -> [FUN-MSR-09] internal/calibrate.SetOutcome(path, hashPrefix,
@@ -286,8 +286,8 @@ for exactly that reason.
     `--num-predict`, or use a faster instrument) rather than a bare
     "context deadline exceeded" — the same actionable-error stance
     REQ-MSR-05 already takes for a bounded invalid-generation retry
-    (unlike that retry loop, a request timeout is not itself retried in
-    v0.1 — see docs/roadmap.md for that as a follow-up).
+    (a timed-out attempt is retried within REQ-MSR-05's shared ≤2-retry
+    budget and counted as an invalid attempt, not aborting the run).
     Timeout is deliberately excluded from the printed/JSON instrument
     config (`InstrumentConfig.Timeout` is `json:"-"`) and so is not part
     of REQ-MSR-04's instrument-relative reproducibility contract: unlike
@@ -401,14 +401,14 @@ for exactly that reason.
     documented as uncalibrated starting points.
     -> [FUN-CFG-01] internal.DefaultThresholds(); flag wiring in cmd
 
-    **v0.1 divergence from the article's protocol, declared per
+    **Divergence from the article's protocol, declared per
     REQ-NFR-03 rather than left silent:** the article treats a ΔH
     calibration baseline (measuring against a zero-ambiguity reference
     spec, not an absolute value) as an obligatory step, and warns that
     quality-gate thresholds must be set at a working temperature
     (~0.3–0.5), never at the stress-test temperature (~1.0) used to
     probe the model's interpretive range — "numbers from the stress test
-    are not substituted into gates." v0.1 does neither: `measure`'s
+    are not substituted into gates." tumanomir does neither: `measure`'s
     default temperature is 1.0, and D_pair is gated as an absolute value
     against 0.30, not as a delta against a calibrated baseline measured
     at working temperature. This is a deliberate, temporary
@@ -607,7 +607,7 @@ for exactly that reason.
 
 35. [REQ-NFR-02] Single static binary, Go ≥ 1.26, stdlib-only except
     gopkg.in/yaml.v3 — added specifically to parse .tumanomir.yaml
-    (REQ-CFG-02) — no CLI framework. This is v0.1's documented trigger for
+    (REQ-CFG-02) — no CLI framework. This is the documented trigger for
     lifting the "no YAML deps" constraint; it is not a general license for
     further dependencies without a similarly documented need.
     -> [PHY-NFR-02] go.mod with exactly one external require:
@@ -621,7 +621,7 @@ for exactly that reason.
 
 ---
 
-## 4. Out of scope for v0.1 (roadmap)
+## 4. Out of scope (roadmap)
 
 - graph-based D_const (RFLP/Neo4j), assisted K_drift (LLM parser)
 - non-Ollama instruments, non-Go projections (SQL DDL, OpenAPI)

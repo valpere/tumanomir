@@ -200,7 +200,7 @@ func appendRowDuplicate(path, hash, instrument string) (bool, error) {
 // exact content that produced this DPair, even if spec_path later
 // changes on disk).
 //
-// Not safe for concurrent callers writing the same path — v0.1 has no
+// Not safe for concurrent callers writing the same path — there is no
 // file locking, matching the project's single-user-CLI stance (no
 // process is expected to run `measure --corpus` concurrently with
 // another against the same corpus file).
@@ -372,7 +372,7 @@ func scanCorpusLines(path string) (lines [][]byte, parsed []*corpusRow, err erro
 // crash or write failure mid-rewrite leaves the original corpus file
 // completely untouched rather than truncated (label's atomicity
 // requirement, REQ-MSR-09). Not safe for concurrent callers writing the
-// same path — v0.1 has no file locking, the same single-user-CLI stance
+// same path — there is no file locking, the same single-user-CLI stance
 // AppendRow already documents.
 func atomicRewriteLines(path string, lines [][]byte) error {
 	// os.CreateTemp always creates with mode 0600 regardless of the
