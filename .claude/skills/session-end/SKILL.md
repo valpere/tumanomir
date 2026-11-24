@@ -1,154 +1,55 @@
+---
+name: session-end
+description: Write or show the reviewed project handoff (.claude/session-state.md). Preserve decisions and distinguish verified results, untested paths, permissions, and open choices.
+---
+
 # /session-end
 
-Manages `.claude/session-log.md` — a per-project rolling log of session
-summaries, one entry per day, last 10 entries kept (count-based, not age-based).
+`/session-end` writes or updates `.claude/session-state.md` from the conversation
+and inspected evidence. `/session-end show` reads it; `/session-end all` may also
+read `.claude/session-log.md` as historical, unverified material.
 
-```
-/session-end          → write today's summary (manual, high quality)
-/session-end show     → print the last entry
-/session-end all      → print all entries (oldest → newest)
-```
+Before writing, read the existing handoff and reconcile decisions with current
+task records. Preserve still-relevant decisions and their sources; replace
+superseded status rather than appending another layer. Use Ukrainian prose and
+concrete source references (transcript UUID/time, command result, commit, or
+authoritative document section).
 
----
-
-## /session-end (no args) — write today's summary
-
-Review the current conversation and write today's entry to
-`.claude/session-log.md`. Use this before switching projects or closing
-Claude Code. The Stop hook (if configured) auto-generates a summary on
-exit, but `/session-end` produces better output — full session context,
-not transcript extraction.
-
-If an entry for today already exists it is **replaced**, not duplicated.
-After write, the log is rotated to keep the last 10 entries.
-
-### Entry format
+Keep the handoff short. Link the project's canonical status/todo documents for
+progress; do not duplicate their task lists as current state. For concurrent
+tasks, keep each task's result, evidence, pending action, and actual
+dependencies together. Preserve applicable earlier verification with its source;
+another turn or session does not invalidate it. Include an unresolved item only
+when it affects that task or a decision; omit empty sections, never invent gaps
+to fill a template.
 
 ```markdown
-## YYYY-MM-DD
+# Перевірений стан — YYYY-MM-DD HH:MM TZ
 
-### Що зробили
-- completed item
+## Завдання та рішення
+- Active objective and decisions needed to continue, with sources.
 
-### Поточний стан
-- current branch / open PR number
-- what is working / what is broken
+<!-- Optional, within the relevant task: a material unresolved check and its
+effect on completion or a decision. Omit when none; no filler section. -->
 
-### Відкриті питання
-- unresolved question (omit section if none)
+## Дозволи та очікування
+- User approval, its exact scope and source, or the decision still needed.
+- Mark completed/expired approvals; do not turn a past one-off action into standing permission or a permanent prohibition.
 
-### Наступні кроки
-- next item, in priority order
+## Далі
+- Next action and links to current task documents.
 ```
 
-Rules: 10–20 bullets total · Ukrainian for content · English for code/files/identifiers · include PR number and branch in Поточний стан · omit Відкриті питання if none.
+Read the result back before claiming the handoff was updated. Update it after
+material decisions and before switching tasks or ending a long session, rather
+than relying on repeated compaction.
 
-### Write logic
+The Stop hook `.claude/hooks/session-end.sh` independently writes
+`.claude/session-checkpoint.json`: recent verbatim turns with source IDs, bounded
+in size, with oversized messages explicitly referred back to their source. It
+makes no model calls and never rewrites the reviewed handoff or the legacy log.
+The full transcript remains the journal; the checkpoint is only a recent window.
 
-```python
-import re, os
-from datetime import date
-
-log = '.claude/session-log.md'
-today = str(date.today())
-max_keep = 10
-
-entry = """## {today}
-
-### Що зробили
-- ...
-
-### Поточний стан
-- ...
-
-### Наступні кроки
-- ...""".format(today=today).strip()
-
-# fill in entry content based on current session, then:
-
-if not os.path.exists(log):
-    open(log, 'w').write(entry + '\n')
-else:
-    content = open(log).read()
-    parts = re.split(r'(?m)(?=^## \d{4}-\d{2}-\d{2})', content)
-    entries = [p.strip() for p in parts if p.strip()]
-    today_idx = next((i for i, e in enumerate(entries) if e.startswith(f'## {today}')), -1)
-    if today_idx >= 0:
-        entries.pop(today_idx)
-        entries.append(entry)        # replace today, moved to end
-    else:
-        entries.append(entry)        # new day
-    entries = entries[-max_keep:]    # freshest write can never be trimmed away
-    open(log, 'w').write('\n\n'.join(entries) + '\n')
-```
-
-After writing, report:
-> "Session log updated — `.claude/session-log.md`, entry for {today}."
-
----
-
-## /session-end show — print last entry
-
-```python
-import re
-
-try:
-    with open('.claude/session-log.md') as f:
-        parts = re.split(r'(?m)(?=^## \d{4}-\d{2}-\d{2})', f.read())
-    entries = [p.strip() for p in parts if p.strip()]
-    print(entries[-1] if entries else '(no entries)')
-except FileNotFoundError:
-    print('No session log found. Run `/session-end` to create one.')
-```
-
----
-
-## /session-end all — print all entries
-
-```python
-import re
-
-try:
-    with open('.claude/session-log.md') as f:
-        parts = re.split(r'(?m)(?=^## \d{4}-\d{2}-\d{2})', f.read())
-    entries = [p.strip() for p in parts if p.strip()]
-    for e in entries:
-        print(e)
-        print()
-    if entries:
-        dates = [e.split('\n')[0].replace('## ', '') for e in entries]
-        print(f"{len(entries)} entries: {dates[0]} → {dates[-1]}")
-except FileNotFoundError:
-    print('No session log found.')
-```
-
----
-
-## How the full system works
-
-```
-Session ends (exit / /exit)
-  └─ Stop hook: .claude/hooks/session-end.sh   (installed, active)
-       ├─ Skip if /session-end ran within 2h (file mtime check)
-       ├─ Try agy -p        — Gemini 3.5 Flash (Low → Medium → High), then Gemini 3.1 Pro
-       ├─ Try opencode run  — ollama/glm-5.2:cloud, kimi-k2.6:cloud, minimax-m2.7:cloud, qwen3.5:cloud
-       ├─ Fallback: raw transcript excerpt
-       └─ Rotates session-log.md to last 10 entries (count-based, no age filtering)
-
-Next session opens
-  └─ SessionStart hook: .claude/hooks/session-last.sh   (installed, active)
-       ├─ Reads last ## YYYY-MM-DD entry from session-log.md
-       └─ Injects as additionalContext: "Previous session context (Xd Yh ago): ..."
-```
-
-The skill works standalone — `/session-end` works without the hooks. The
-hooks (installed in this project) add automation on top.
-
-**Log file**: `.claude/session-log.md` — gitignored (added to `.gitignore`
-under "Session recall — per-project, local-only context log").
-
-**Troubleshooting**:
-```bash
-tail -30 ~/.cache/tumanomir/hooks.log
-cat .claude/session-log.md
-```
+SessionStart injects the reviewed handoff and checkpoint references via
+`session-last.sh`. Verbatim turns are included after compaction or when there
+is no reviewed handoff.
