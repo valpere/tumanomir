@@ -99,7 +99,7 @@ Rationale:
   remaining ≈ 0.18 comes from declaration-set divergence: types and fields that some samples
   have and others lack. That is structure, and `measure --decls` (REQ-MSR-12) already itemizes
   it. So the hypothesis that naming noise makes up most of D_pair is not confirmed.
-- **The naming-noise fixture stays at 0.67 in every safe mode.** It varies field names, and only
+- **The naming-noise fixture stays at 0.67 in every safe mode** and even under `keepmem`. It varies field names, not just type names, and only
   semantic matching could fold those; #106 rejected that.
 - **Revisit when `calibrate` (REQ-CAL-01) has labeled rows.** Same-spec run-to-run spread
   (`32cc10f`: 0.18 vs 0.24) suggests that N-sensitivity is the more pressing question.
