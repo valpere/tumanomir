@@ -17,6 +17,15 @@ CI for D_pair — REQ-MSR-07), and `gate` (both layers in one pass, one exit
 code for CI, REQ-GATE-01..03) all work end-to-end against a real Ollama
 instance. Details: [`architecture.md`](architecture.md).
 
+## v0.2 — done
+
+`measure --keep-samples` persists generations, discarded samples, timeouts
+and the instrument configuration (REQ-MSR-11); `measure --decls` adds a
+per-declaration agreement report (REQ-MSR-12); the Ollama per-request
+timeout is configurable, and a timed-out sample is regenerated instead of
+aborting the run. The D_pair bootstrap CI is no longer biased low by ~1/N
+(REQ-MSR-07) — intervals from v0.1 are not directly comparable.
+
 ## Mid-term — discussed, not scheduled
 
 1. **Data for `tumanomir calibrate`.** The tool itself is now built
