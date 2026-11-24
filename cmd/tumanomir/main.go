@@ -21,6 +21,7 @@ import (
 	"github.com/valpere/tumanomir/internal/instrument"
 	"github.com/valpere/tumanomir/internal/metrics"
 	"github.com/valpere/tumanomir/internal/report"
+	"github.com/valpere/tumanomir/internal/samples"
 	"github.com/valpere/tumanomir/internal/spec"
 )
 
@@ -85,6 +86,13 @@ Flags for measure (and gate, once an instrument resolves):
   --num-predict    int     required: max generated tokens; must exceed natural output length
   --think          bool    enable reasoning-model think mode (default false)
   --d-pair-max     float   gate: max 1-minus-mean-pairwise-AST-similarity (default 0.30)
+  --keep-samples   string  opt-in: write each run's accepted Go blocks (NN.go),
+                            discarded/timed-out attempts and instrument.json
+                            into a fresh subdirectory of this dir, for audit
+                            and offline re-analysis; the created path goes to
+                            stderr (default off; .tumanomir.yaml's top-level
+                            keep_samples: sets it, --keep-samples= disables;
+                            REQ-MSR-11)
 
 gate fails with exit code 2 if any measure-specific flag above is passed
 explicitly while no instrument resolves (CLI flags or .tumanomir.yaml's
@@ -546,6 +554,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		numPredict     int
 		think          bool
 		timeout        time.Duration
+		keepSamples    string
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
@@ -559,6 +568,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
+	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples(), "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("measure", formatFlag) {
@@ -613,6 +623,7 @@ func runMeasureImpl(args []string, newGen func(internal.InstrumentConfig) instru
 		fmt.Fprintln(os.Stderr, "measure:", err)
 		return 2
 	}
+	keepRun("measure", keepSamples, specContent, mr)
 
 	// Opt-in corpus accretion (issue #107): off by default (config.CorpusEnabled
 	// is false unless .tumanomir.yaml explicitly sets corpus.enabled: true). When
@@ -685,6 +696,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 	promptEstimate := instrument.EstimatePromptTokens(prompt)
 
 	var sources [][]byte
+	var attempts []report.SampleRecord
 	discarded := 0
 	truncated := 0
 	underestimated := 0
@@ -698,6 +710,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 					// remain for this slot, same as an invalid-Go-parse
 					// attempt below; never abort the whole run over it
 					// (issue #136).
+					attempts = append(attempts, report.SampleRecord{Kind: report.SampleTimeout, Slot: slot, Attempt: attempt, Data: []byte(err.Error())})
 					continue
 				}
 				return report.MeasureResult{}, fmt.Errorf("generation failed: %w", err)
@@ -712,6 +725,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 			block, ok := instrument.ExtractGoBlock(g.Text)
 			if ok && dispersion.ValidGo(block) {
 				sources = append(sources, block)
+				attempts = append(attempts, report.SampleRecord{Kind: report.SampleAccepted, Slot: slot, Attempt: attempt, Data: block})
 				valid = true
 				// A truncated generation can still parse as valid Go (e.g. a
 				// complete top-level decl before the cut) and pass ValidGo —
@@ -725,6 +739,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 				break
 			}
 			// invalid: retry while attempts remain for this slot
+			attempts = append(attempts, report.SampleRecord{Kind: report.SampleDiscard, Slot: slot, Attempt: attempt, Data: g.Text})
 		}
 		if !valid {
 			// 3rd attempt still invalid: discard this slot and move on —
@@ -760,7 +775,24 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 		DiscardWarn:          discardRate > internal.DiscardWarnThreshold,
 		Truncated:            truncated,
 		PromptUnderestimated: underestimated,
+		Attempts:             attempts,
 	}, nil
+}
+
+// keepRun persists the run's samples when --keep-samples/keep_samples is
+// set (REQ-MSR-11). A write failure only warns on stderr and never changes
+// the exit code — same policy as REQ-MSR-08's corpus append — so a broken
+// audit trail can't poison a successful measurement.
+func keepRun(cmdName, dir string, specContent []byte, mr report.MeasureResult) {
+	if dir == "" {
+		return
+	}
+	run, err := samples.Write(dir, specContent, mr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: warning: keep-samples write failed: %v\n", cmdName, err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s: samples kept in %s\n", cmdName, run)
 }
 
 // gateMeasureFlagNames lists the measure-specific CLI flags whose explicit
@@ -777,7 +809,7 @@ func runMeasureWithGenerator(gen instrument.Generator, cfg internal.InstrumentCo
 var gateMeasureFlagNames = map[string]bool{
 	"n": true, "samples": true, "temp": true, "sim-threshold": true,
 	"num-ctx": true, "num-predict": true, "think": true, "d-pair-max": true,
-	"timeout": true,
+	"timeout": true, "keep-samples": true,
 }
 
 // runGate parses flags, validates the positional spec-file argument,
@@ -834,6 +866,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 		numPredict     int
 		think          bool
 		timeout        time.Duration
+		keepSamples    string
 	)
 	fs.StringVar(&configFlag, "config", "", "path to a .tumanomir.yaml config file")
 	fs.StringVar(&formatFlag, "format", "text", "output format: text or json")
@@ -850,6 +883,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 	fs.BoolVar(&think, "think", seeded.Think, "enable reasoning-model think mode")
 	fs.Float64Var(&th.DPairMax, "d-pair-max", th.DPairMax, "gate: max 1-minus-mean-pairwise-AST-similarity (hypothesis, not calibrated)")
 	fs.DurationVar(&timeout, "timeout", seeded.Timeout, "per-request timeout against the backend (e.g. 10m); raise for slow/CPU-bound local models")
+	fs.StringVar(&keepSamples, "keep-samples", fileCfg.KeepSamples(), "opt-in: persist this run's generations and instrument config under a fresh subdirectory of this dir (REQ-MSR-11)")
 	_ = parseWithTrailingFlags(fs, args)
 
 	if !validateFormatFlag("gate", formatFlag) {
@@ -921,6 +955,7 @@ func runGateImpl(args []string, newGen func(internal.InstrumentConfig) instrumen
 			fmt.Fprintln(os.Stderr, "gate:", err)
 			return 2
 		}
+		keepRun("gate", keepSamples, specs[0].Content, mr)
 		mrPtr = &mr
 	}
 

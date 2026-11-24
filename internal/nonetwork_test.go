@@ -28,6 +28,7 @@ func TestNoNetworkImports(t *testing.T) {
 		"github.com/valpere/tumanomir/internal/spec/...",
 		"github.com/valpere/tumanomir/internal/config/...",
 		"github.com/valpere/tumanomir/internal/calibrate/...",
+		"github.com/valpere/tumanomir/internal/samples/...",
 	}
 
 	for _, pattern := range pkgPatterns {
@@ -43,7 +44,7 @@ func TestNoNetworkImports(t *testing.T) {
 
 		for _, dep := range parseDeps(string(out)) {
 			if dep == "net" || strings.HasPrefix(dep, "net/") {
-				t.Errorf("%s: found network dependency %q; internal/metrics, internal/spec, internal/config, and internal/calibrate must stay network-free (REQ-CHK-05)", pattern, dep)
+				t.Errorf("%s: found network dependency %q; internal/metrics, internal/spec, internal/config, and internal/calibrate, and internal/samples must stay network-free (REQ-CHK-05)", pattern, dep)
 			}
 		}
 	}

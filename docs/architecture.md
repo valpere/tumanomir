@@ -96,6 +96,10 @@ tumanomir version                       # надрукувати версію і
 --timeout        duration тайм-аут одного запиту до бекенда, напр. 10m
                           (default 5m); збільшуйте для повільних/CPU-bound
                           локальних моделей (REQ-MSR-10)
+--keep-samples   string  опційно: зберегти згенеровані Go-блоки, discard/timeout
+                          та instrument.json у свіжу піддиректорію цієї dir
+                          (шлях — у stderr; keep_samples: у .tumanomir.yaml;
+                          --keep-samples= вимикає; REQ-MSR-11)
 
 # gate only
 --explain        bool    on non-zero exit, print which layer(s) failed and
@@ -168,12 +172,13 @@ internal/metrics/       K_drift (лінтер трасування), D_const (л
 internal/dispersion/    AST-фічі, cosine, single-linkage, ентропія, D_pair
 internal/instrument/    інтерфейс Generator, Ollama-бекенд, PromptV1 + фрейм-екстрактор
 internal/report/        рендеринг CheckResult/MeasureResult/Report у TTY-звіт (REQ-OUT-01)
+internal/samples/       запис --keep-samples: NN.go, discard/timeout, instrument.json (REQ-MSR-11)
 internal/calibrate/     Spearman-кореляція + median split по історичному корпусу для `calibrate` (REQ-CAL-01..05)
 ```
 
 `internal/instrument` — єдиний пакет, якому дозволено мережу
 (`internal/nonetwork_test.go` рантайм-перевіряє, що `internal/metrics`,
-`internal/spec`, `internal/config` і `internal/calibrate` цього не
+`internal/spec`, `internal/config`, `internal/calibrate` і `internal/samples` цього не
 порушують — REQ-CHK-05/REQ-CAL-05).
 
 Рендеринг звітів винесено в `internal/report` (`RenderCheck`/`RenderMeasure`,

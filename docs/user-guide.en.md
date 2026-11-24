@@ -191,6 +191,19 @@ above and from JSON output — unlike every other instrument setting, it's
 a client-side wait bound with no effect on generation, so it isn't part
 of what REQ-MSR-04 requires a report to reproduce.
 
+`--keep-samples <dir>` (opt-in, REQ-MSR-11) keeps the evidence of a run so
+a surprising D_pair can be inspected without regenerating by hand. Each run
+creates its own subdirectory `<dir>/<spec-hash>-<instrument-hash>-<random>/`
+(reruns never overwrite or mix) containing `NN.go` (accepted Go blocks,
+verbatim, in analysis order), `sSS-aA.discard.txt` (raw invalid attempts),
+`sSS-aA.timeout.txt` (timed-out attempts) and `instrument.json`. Re-running
+`dispersion.Analyze` over the sorted `.go` files reproduces D_pair, CI,
+clusters and H exactly. The created path is printed to stderr; stdout is
+unchanged. A write failure is only a stderr warning (exit code unchanged).
+Config: top-level `keep_samples: <dir>`; the flag overrides it and
+`--keep-samples=` disables it. Works on `gate` too (an explicit flag with no
+instrument is the REQ-GATE-02 error).
+
 **The discard counter and the >40% warning (REQ-MSR-05).** Each sample
 gets up to 3 attempts (1 initial + 2 retries); if none produce valid Go,
 the sample is discarded — the count is never hidden. A per-request
@@ -482,6 +495,7 @@ corpus:
   enabled: false          # bool; off by default — measure never writes
                           # to disk unless you opt in (REQ-MSR-08)
   path: .tumanomir/corpus.jsonl   # string; default shown
+keep_samples: ""        # top-level dir; off by default (REQ-MSR-11)
 ```
 
 `prompt`/`prompt_version` are deliberately absent from the schema — not
