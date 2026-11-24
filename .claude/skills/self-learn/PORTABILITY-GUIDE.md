@@ -100,7 +100,7 @@ after wiring them in:
 | Skill | What to log |
 |-------|-------------|
 | `/fix-review` | Arbiter confirmations → mistake patterns; dismissals → anti-patterns |
-| `/ship` | Smooth pipeline → win; late-caught issues → mistake |
+| `/deliver` | Smooth pipeline → win; late-caught issues → mistake |
 | `/live-test` | Bugs found → mistake (caught earlier?); flows that caught real issues → win |
 
 Check which of these skills are available in the target project before
