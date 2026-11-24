@@ -29,8 +29,9 @@ import (
 // in v0.1) is naming-style noise, not structural divergence. This number
 // is the input to a future Phase 2 go/no-go decision on whether to add
 // an additive, non-gating D_pair_shape diagnostic (identifier-
-// canonicalized feature keys); that decision is NOT made here — this
-// test only measures and pins the baseline.
+// canonicalized feature keys). That decision was made separately —
+// no-go, 2026-11-24 (#171; numbers in docs/investigation/history.md) —
+// this test only measures and pins the baseline.
 //
 // Explicitly rejected alternatives (documented so they aren't re-suggested):
 //   - Embedding-based synonym matching: reintroduces a non-deterministic

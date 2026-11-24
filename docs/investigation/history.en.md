@@ -60,6 +60,50 @@ Instrument A = qwen3-coder:30b (Ollama local), B = kimi-k2.7-code:cloud
 Main reproduced effect: adding structural docs → +0.120/+0.115 sim on two
 independent instruments.
 
+## Decision: D_pair_shape — no-go (2026-11-24, #171)
+
+The question #106 (`naming_noise_test.go`) left open: whether to add an additive, non-gating
+`D_pair_shape` field on identifier-canonicalized keys next to D_pair. The field data came from
+#163/#169: dreet-dojo `req-uc` @ `32cc10f`, fixture
+`internal/dispersion/testdata/dreet-dojo-req-uc-32cc10f/`, N=9. The archived `_sanity/out*/`
+corpus was used alongside it. Val's decision: **no-go**.
+
+A prototype (scratch, not in the repo) computed mean-pairwise D_pair under five key modes:
+
+- `base`: the `astfeat.go` keys.
+- `slot`: local type names rewritten to the #169 slot labels.
+- `slotsig`: `slot` plus type-only signatures.
+- `keepmem`: every type name rewritten to `T`.
+- `drop`: every declared identifier dropped.
+
+| set | base | slot | slotsig | keepmem | drop |
+|---|--:|--:|--:|--:|--:|
+| naming-noise (N=3) | 0.667 | 0.667 | 0.667 | 0.667 | 0.000 |
+| naming-noise-reorder | 0 | 0 | 0 | 0 | 0 |
+| dreet-dojo (N=9) | 0.246 | 0.187 | 0.182 | 0.034 | 0.013 |
+| sharp A / cloud | 0.270 / 0.318 | 0.257 / 0.269 | 0.257 / 0.269 | 0.131 / 0.055 | 0.177 / 0.024 |
+| fog A / cloud | 0.508 / 0.758 | 0.460 / 0.747 | 0.459 / 0.747 | 0.177 / 0.192 | 0.095 / 0.137 |
+| real-si A / cloud | 0.476 / 0.742 | 0.476 / 0.681 | 0.465 / 0.679 | 0.182 / 0.182 | 0.073 / 0.117 |
+| real-ragivka A / cloud | 0.718 / 0.722 | 0.671 / 0.701 | 0.668 / 0.700 | 0.091 / 0.037 | 0.093 / 0.044 |
+| real-ragivka-full A / cloud | 0.598 / 0.607 | 0.589 / 0.590 | 0.587 / 0.589 | 0.130 / 0.034 | 0.127 / 0.047 |
+
+Rationale:
+
+- **`drop` is rejected.** On instrument A it inverts sharp and fog: sharp scores 0.18 and fog 0.09.
+- **`keepmem` is rejected.** It merges distinct types into one, so real-ragivka falls from 0.72
+  to 0.04. That is collapse, not denoising.
+- **`slot`/`slotsig` are safe but weak.** They reorder nothing on either instrument, but they move
+  D_pair by only 2–24%. Parameter names contribute ≤ 0.005. A second column would enlarge the
+  report without improving any decision.
+- **The hypothesis is not confirmed.** On dreet-dojo, type renames explain ≈ 0.06 of 0.25. The
+  remaining ≈ 0.18 comes from declaration-set divergence: types and fields that some samples
+  have and others lack. That is structure, and `measure --decls` (REQ-MSR-12) already itemizes
+  it. So the hypothesis that naming noise makes up most of D_pair is not confirmed.
+- **The naming-noise fixture stays at 0.67 in every safe mode** and even under `keepmem`. It varies field names, not just type names, and only
+  semantic matching could fold those; #106 rejected that.
+- **Revisit when `calibrate` (REQ-CAL-01) has labeled rows.** Same-spec run-to-run spread
+  (`32cc10f`: 0.18 vs 0.24) suggests that N-sensitivity is the more pressing question.
+
 ## Ollama pitfalls (from the experiment, baked into the requirements)
 
 - Thinking mode eats `num_predict` on complex specs → empty content; the
