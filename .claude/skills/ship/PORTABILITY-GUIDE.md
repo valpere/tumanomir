@@ -30,12 +30,12 @@ Before installing, confirm the user has authorized it.
 **Recommended: run `/generate-ship`** — it discovers the project's stack, issue
 tracker, and agent names, then writes a fully wired version automatically.
 
-**Manual install** (canonical source: `~/wrk/common/skills/ship/`):
+**Manual install** (canonical source: `~/wrk/common_claude/skills/ship/`):
 
 ```bash
 mkdir -p .claude/skills/ship/
-cp ~/wrk/common/skills/ship/SKILL.md .claude/skills/ship/
-cp ~/wrk/common/skills/ship/PORTABILITY-GUIDE.md .claude/skills/ship/
+cp ~/wrk/common_claude/skills/ship/SKILL.md .claude/skills/ship/
+cp ~/wrk/common_claude/skills/ship/PORTABILITY-GUIDE.md .claude/skills/ship/
 ```
 
 Then fill in the placeholders in `.claude/skills/ship/SKILL.md`:

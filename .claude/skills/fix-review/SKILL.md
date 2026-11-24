@@ -603,7 +603,7 @@ Telemetry: ${TELEMETRY_FILE}
 
 **Failover reporting (mandatory):** if `FAILOVER_TIER` is non-empty, append a
 `### ⚠️ Provider failover` section — see the canonical library skill
-(`~/wrk/common/skills/fix-review/SKILL.md`) STEP 11 for the exact wording per
+(`~/wrk/common_claude/skills/fix-review/SKILL.md`) STEP 11 for the exact wording per
 failover kind (`external_agents` vs `ollama_local` vs `cloud_unavailable`).
 
 ---
