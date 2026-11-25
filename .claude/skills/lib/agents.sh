@@ -26,7 +26,7 @@
 # a value-taking option, so the text after it was silently dropped and
 # agy fell back to autonomous exploration with no real prompt. The
 # working pattern (`-p "text"` as a bare flag + trailing positional
-# argument) was already proven in session-end.sh — see its `try_agy()`.
+# argument) was already proven in the retired session-end.sh summary hook.
 # Re-verified with the real review prompt: direct, correct answers, with
 # or without --mode plan.
 
@@ -46,7 +46,7 @@ agent_agy() {
   local model="$1" prompt_file="$2"
   # Unlike every other adapter here, the prompt MUST be a positional
   # argument, not stdin/file-ref — verified 2026-07-30 (see the header
-  # comment above and session-end.sh's try_agy()). This does mean agy
+  # comment above). This does mean agy
   # risks ARG_MAX on unusually large diffs where the other tools don't;
   # accepted tradeoff since it's otherwise a clean, working adapter.
   agy -p "$(cat "$prompt_file")" --model "${model:-Gemini 3.8 Flash (Low)}" \
