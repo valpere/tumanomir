@@ -524,7 +524,7 @@ One entry per round + one arbiter entry, all in the same run.
 
 **Round entry:**
 ```jsonc
-{"timestamp": "2026-07-03T12:34:56Z", "pr_number": 1, "round_number": 1, "model": "glm-5.1:cloud", "provider": "ollama", "findings_count": 4, "prompt_tokens": null, "completion_tokens": null, "estimated_cost_usd": 0.0, "duration_ms": 8200}
+{"timestamp": "2026-07-03T12:34:56Z", "pr_number": 1, "round_number": 1, "model": "glm-5.3:cloud", "provider": "ollama", "findings_count": 4, "prompt_tokens": null, "completion_tokens": null, "estimated_cost_usd": 0.0, "duration_ms": 8200}
 ```
 
 **Arbiter entry:**
