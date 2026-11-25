@@ -93,8 +93,10 @@ ollama_payload_system_no_think() {
 # normal 4000 cap; use true only with a cap of ~16000 (num_predict includes
 # thinking tokens).
 ollama_payload_system_think() {
-  local num_predict="${4:-16000}" think="${5:-true}"
-  jq -n --arg model "$1" --arg sys "$2" --arg prompt "$3" --argjson np "$num_predict" --argjson th "$think" \
+  local num_predict="${4:-16000}" think="${5:-true}" th_flag=--arg
+  # think may come JSON-encoded ("low", true, false: kislyuk yq -c) or bare (low: Go yq).
+  case "$think" in true|false|\"*\") th_flag=--argjson ;; esac
+  jq -n --arg model "$1" --arg sys "$2" --arg prompt "$3" --argjson np "$num_predict" "$th_flag" th "$think" \
     '{model:$model, messages:[{role:"system",content:$sys},{role:"user",content:$prompt}],
       stream:false, think:$th, options:{num_predict:$np}}'
 }
