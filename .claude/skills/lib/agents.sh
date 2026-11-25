@@ -26,8 +26,8 @@
 # a value-taking option, so the text after it was silently dropped and
 # agy fell back to autonomous exploration with no real prompt. The
 # working pattern (`-p "text"` as a bare flag + trailing positional
-# argument) was already proven in the retired session-end.sh summary hook.
-# Re-verified with the real review prompt: direct, correct answers, with
+# argument).
+# Verified with the real review prompt: direct, correct answers, with
 # or without --mode plan.
 
 # ---------------------------------------------------------------------------
