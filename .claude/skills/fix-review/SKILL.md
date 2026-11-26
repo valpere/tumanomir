@@ -543,6 +543,9 @@ One entry per round + one arbiter entry, all in the same run.
 {"timestamp": "2026-07-03T12:34:56Z", "pr_number": 1, "round_number": 1, "model": "glm-5.3:cloud", "provider": "ollama", "findings_count": 4, "parse_ok": true, "prompt_tokens": null, "completion_tokens": null, "estimated_cost_usd": 0.0, "duration_ms": 8200}
 ```
 
+`parse_ok` is `false` exactly when `$RUN_DIR/round_N.unparsed.txt` exists (Step 4),
+for any tier including external_agents; `findings_count` stays the parsed count.
+
 **Arbiter entry:**
 ```jsonc
 {"timestamp": "2026-07-03T12:35:10Z", "pr_number": 1, "round_number": "arbiter", "model": "claude", "provider": "local", "confirmed": 5, "escalated": 1, "dismissed": 3, "added_new": 1, "parallel": false, "wall_time_ms": 24000}
