@@ -283,10 +283,13 @@ Substitute:
 
 ```bash
 DIFF=$(gh pr diff "${PR_NUMBER}" --repo valpere/tumanomir)
-PROMPT=$(printf '%s' "$PROMPT_TEMPLATE" | sed "s|{PROJECT_CONTEXT}|$PROJECT_CONTEXT|" | sed "s|{DIFF}|$DIFF|")
+# Plain bash substitution: sed breaks on newlines or '|' in the diff/context and
+# would leave PROMPT empty. The quoted replacement keeps '&' literal (bash 5.2).
+PROMPT="${PROMPT_TEMPLATE//\{PROJECT_CONTEXT\}/"$PROJECT_CONTEXT"}"
+PROMPT="${PROMPT//\{DIFF\}/"$DIFF"}"
 
 RUN_DIR=$(mktemp -d -t fix-review-XXXX)
-START_MS=$(python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo $(($(date +%s) * 1000)))
+START_MS=$(($(date +%s%N) / 1000000))
 
 REVIEW_SYSTEM_MSG="You are a senior code reviewer. Your entire response MUST be a raw JSON array — nothing else. Start with [ and end with ]. No prose, no markdown fences, no explanations before or after. Report at most 8 findings, most severe first; each body under 30 words. Do not include informational or 'no action needed' entries — only real issues. If there are no issues output exactly: []"
 export REVIEW_SYSTEM_MSG
@@ -303,7 +306,7 @@ ollama_review_payload() {
 run_round() {
   local n="$1" model="$2"
   local r_start r_end
-  r_start=$(python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo $(($(date +%s) * 1000)))
+  r_start=$(($(date +%s%N) / 1000000))
   local payload response active_provider active_url active_key
   active_provider="$ACTIVE_PROVIDER"
   active_url="$ACTIVE_API_URL"
@@ -333,7 +336,7 @@ run_round() {
     printf '%s\n\n%s' "$REVIEW_SYSTEM_MSG" "$PROMPT" > "$prompt_file"
     if try_external_agents "$n" "$prompt_file" "$CONFIG" "$RUN_DIR"; then
       rm -f "$prompt_file"
-      r_end=$(python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo $(($(date +%s) * 1000)))
+      r_end=$(($(date +%s%N) / 1000000))
       # try_external_agents already wrote round_${n}.raw.json/.meta/.failover —
       # only fix up the timing half of .meta (it wrote duration "0").
       local winning_tool; winning_tool=$(head -1 "$RUN_DIR/round_${n}.meta")
@@ -356,7 +359,7 @@ run_round() {
     printf '%s' "$local_model" > "$RUN_DIR/round_${n}.failover"
   fi
 
-  r_end=$(python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo $(($(date +%s) * 1000)))
+  r_end=$(($(date +%s%N) / 1000000))
   printf '%s' "$response"   > "$RUN_DIR/round_${n}.raw.json"
   printf '%s\n%s' "$model"  "$((r_end - r_start))" > "$RUN_DIR/round_${n}.meta"
 }
@@ -390,8 +393,15 @@ parse_round() {
   content=$(chat_content "$PROVIDER" "$raw")
   content=$(printf '%s' "$content" | sed -E 's/^```(json)?//; s/```$//')
   if ! echo "$content" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    # Keep the raw answer for the arbiter (Step 6); [] only keeps aggregation working.
+    # Such a round is NOT clean: Step 11 reports it, telemetry has parse_ok:false.
     echo "[]" > "$RUN_DIR/round_${n}.findings.json"
-    echo "warn: round ${n} response not a JSON array — treating as 0 findings" >&2
+    if [ -n "$(printf '%s' "$content" | tr -d '[:space:]')" ]; then
+      printf '%s\n' "$content" > "$RUN_DIR/round_${n}.unparsed.txt"
+      echo "warn: round ${n} response is not a valid JSON array — kept in round_${n}.unparsed.txt for the arbiter" >&2
+    else
+      echo "warn: round ${n} returned empty content — 0 findings" >&2
+    fi
     return
   fi
   echo "$content" > "$RUN_DIR/round_${n}.findings.json"
@@ -399,7 +409,9 @@ parse_round() {
 parse_round 1; parse_round 2; parse_round 3
 ```
 
-If a round returned prose: skip its findings (already 0). Don't retry.
+If a round returned prose or broken JSON, its findings are not lost: the raw
+answer is in `round_N.unparsed.txt` and the arbiter reads it (Step 6). Don't
+retry the model and don't repair the JSON with regexes.
 
 ---
 
@@ -445,6 +457,10 @@ contradicts a methodological invariant listed in `CLAUDE.md` (e.g. "make
 D_const graph-based" or "hide invalid generations") should be dismissed with
 reason — those are explicit intentional deviations, not bugs.
 
+**Unparsed rounds**: for each `$RUN_DIR/round_*.unparsed.txt`, read the
+model's answer and carry its findings over by hand, as that model's vote
+(same file/line dedupe as Step 5). Note in Step 11 whether it was carried over.
+
 **Independent scan**: also walk the full diff once for anything all three
 models missed.
 
@@ -487,7 +503,7 @@ git commit -m "fix(pr#${PR_NUMBER}): address /fix-review findings
 
 $(jq -r '.[] | select(.ruling=="CONFIRM" or .ruling=="ESCALATE") | "- \(.file):\(.line) — \(.body[0:80])"' "$RUN_DIR/arbiter.json" | head -20)
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
+<attribution line from the current session's instructions>"
 
 git push
 ```
@@ -524,7 +540,7 @@ One entry per round + one arbiter entry, all in the same run.
 
 **Round entry:**
 ```jsonc
-{"timestamp": "2026-07-03T12:34:56Z", "pr_number": 1, "round_number": 1, "model": "glm-5.3:cloud", "provider": "ollama", "findings_count": 4, "prompt_tokens": null, "completion_tokens": null, "estimated_cost_usd": 0.0, "duration_ms": 8200}
+{"timestamp": "2026-07-03T12:34:56Z", "pr_number": 1, "round_number": 1, "model": "glm-5.3:cloud", "provider": "ollama", "findings_count": 4, "parse_ok": true, "prompt_tokens": null, "completion_tokens": null, "estimated_cost_usd": 0.0, "duration_ms": 8200}
 ```
 
 **Arbiter entry:**
@@ -579,6 +595,8 @@ echo "Ready for /deliver to merge: ${READY}"
 Provider: ${ACTIVE_PROVIDER}
 Models:   ${MODEL_R1} | ${MODEL_R2} | ${MODEL_R3}
 Wall time: ${WALL_TIME_MS} ms (sequential — no parallel speedup in this project's Ollama config)
+
+Unparsed:  ${UNPARSED}          # e.g. "round 1 (glm-5.3:cloud) — carried over by arbiter"; "none"
 
 Aggregated findings: ${TOTAL}
   3/3 votes: ${THREE_VOTE} (high confidence)
